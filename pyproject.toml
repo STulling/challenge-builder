@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [project.scripts]
-build-challenge = "build_challenge:main"
+build-challenge = "ctf_challenge_builder:main"
 
 [tool.setuptools]
-py-modules = ["build_challenge"]
+packages = ["ctf_challenge_builder"]
 
-[tool.setuptools.packages.find]
-where = ["."]
+[tool.setuptools.package-data]
+ctf_challenge_builder = ["pulumi-template/**/*"]
