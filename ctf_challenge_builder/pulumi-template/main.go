@@ -121,11 +121,13 @@ func main() {
 		if err != nil {
 			return err
 		}
+		var portName string // Something like "80/tcp"
+		portName = dcfg.Services[firstService].Ports[0] + "/" + "TCP"
 		// if the challenge is HTTP, set the ConnectionInfo to the URL of the first service
 		if cfg.IsHTTP {
-			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(dcfg.Services[firstService].Ports[0])))
+			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
 		} else {
-			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(dcfg.Services[firstService].Ports[0])))
+			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
 		}
 		return nil
 	})
