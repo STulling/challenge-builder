@@ -15,6 +15,46 @@ import tempfile
 import yaml
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+import colorama
+from colorama import Fore, Back, Style
+import requests
+
+# Initialize colorama
+colorama.init(autoreset=True)
+
+
+class Logger:
+    @staticmethod
+    def info(message: str):
+        print(f"{Fore.BLUE}ℹ️  {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def success(message: str):
+        print(f"{Fore.GREEN}✅ {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def warning(message: str):
+        print(f"{Fore.YELLOW}⚠️  {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def error(message: str):
+        print(f"{Fore.RED}❌ {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def step(message: str):
+        print(f"{Fore.CYAN}🔧 {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def build(message: str):
+        print(f"{Fore.MAGENTA}🏗️  {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def push(message: str):
+        print(f"{Fore.BLUE}📤 {message}{Style.RESET_ALL}")
+
+    @staticmethod
+    def pull(message: str):
+        print(f"{Fore.BLUE}📥 {message}{Style.RESET_ALL}")
 
 
 class ChallengeBuilder:
@@ -43,35 +83,73 @@ class ChallengeBuilder:
         self.has_compose = self.docker_compose_path.exists()
         self.has_challenge = self.challenge_yml_path.exists()
 
-    def run_command(self, cmd: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    def check_registry_connectivity(self) -> bool:
+        """Check if the registry is reachable"""
+        try:
+            # Try to connect to the registry
+            response = requests.get(f"https://{self.registry}/v2/", timeout=10, verify=False)
+            if response.status_code in [200, 401]:  # 401 is OK, means auth required
+                return True
+        except requests.RequestException:
+            pass
+        return False
+
+    def check_ctf_website(self) -> bool:
+        """Check if the CTF website is up"""
+        try:
+            response = requests.get(f"https://{self.ctf_domain}", timeout=10, verify=False)
+            return response.status_code == 200
+        except requests.RequestException:
+            pass
+        return False
+
+    def perform_sanity_checks(self):
+        """Perform sanity checks before building"""
+        Logger.info("Performing sanity checks...")
+        
+        # Check registry connectivity
+        if not self.check_registry_connectivity():
+            Logger.warning(f"⚠️  Registry {self.registry} is not reachable. Build may fail.")
+        else:
+            Logger.success(f"Registry {self.registry} is reachable.")
+        
+        # Check CTF website
+        if not self.check_ctf_website():
+            Logger.warning(f"⚠️  CTF website {self.ctf_domain} is not responding. Build may fail.")
+        else:
+            Logger.success(f"CTF website {self.ctf_domain} is up.")
+        
+        print()
+
+    def run_command(self, cmd: List[str], cwd: Optional[Path] = None, input_text: Optional[str] = None) -> subprocess.CompletedProcess:
         """Run a shell command and return the result"""
-        print(f"Running: {' '.join(cmd)}")
+        Logger.step(f"Running: {' '.join(cmd)}")
         if cwd:
-            print(f"  in directory: {cwd}")
+            Logger.info(f"  in directory: {cwd}")
         # If this is a docker command and sudo is required, prepend sudo
         if self.use_sudo and cmd and cmd[0] == 'docker':
             cmd = ['sudo'] + cmd
 
         try:
-            # Allow interactive commands (like docker login) to use the real stdio when needed
-            interactive = cmd and cmd[0:2] == ['docker', 'login'] if len(cmd) >= 2 else False
-            if interactive:
-                result = subprocess.run(cmd, cwd=cwd, check=True)
+            if input_text is not None:
+                result = subprocess.run(cmd, cwd=cwd, input=input_text, text=True, capture_output=True, check=True)
             else:
                 result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
             if result.stdout:
-                print(f"Output: {result.stdout.strip()}")
+                Logger.info(f"Output: {result.stdout.strip()}")
             return result
         except subprocess.CalledProcessError as e:
-            print(f"Error running command: {' '.join(cmd)}")
-            print(f"Return code: {e.returncode}")
-            print(f"Stdout: {e.stdout}")
-            print(f"Stderr: {e.stderr}")
+            Logger.error(f"Command failed: {' '.join(cmd)}")
+            Logger.error(f"Return code: {e.returncode}")
+            if e.stdout:
+                Logger.info(f"Stdout: {e.stdout}")
+            if e.stderr:
+                Logger.warning(f"Stderr: {e.stderr}")
             raise
 
     def read_docker_compose(self) -> Dict[str, Any]:
         """Read and parse the docker-compose.yml file"""
-        print("Reading docker-compose.yml...")
+        Logger.info("Reading docker-compose.yml...")
         with open(self.docker_compose_path, 'r') as f:
             compose_data = yaml.safe_load(f)
         return compose_data
@@ -110,12 +188,12 @@ class ChallengeBuilder:
         Build and push Docker images for services that need it
         Returns a mapping of service_name -> new_image_tag for substitution
         """
-        print("Building and pushing Docker images...")
+        Logger.build("Building and pushing Docker images...")
         services = compose_data.get('services', {})
         image_substitutions = {}
         
         for service_name, service_config in services.items():
-            print(f"\nProcessing service: {service_name}")
+            Logger.info(f"\nProcessing service: {service_name}")
             
             needs_build, current_image, new_image_tag = self.get_service_image_info(service_name, service_config)
             
@@ -139,7 +217,7 @@ class ChallengeBuilder:
                 
             elif current_image and not current_image.startswith(self.registry):
                 # External image that should be retagged and pushed
-                print(f"Retagging external image {current_image} to {new_image_tag}")
+                Logger.info(f"Retagging external image {current_image} to {new_image_tag}")
                 
                 # Pull, tag, and push
                 self.run_command(['docker', 'pull', current_image])
@@ -192,26 +270,35 @@ class ChallengeBuilder:
 
     def ensure_logged_in(self):
         """Ensure the user is logged into the configured registry. If not, prompt for docker login."""
-        print(f"Checking Docker login status for registry: {self.registry}")
+        Logger.info(f"Checking Docker login status for registry: {self.registry}")
         try:
             if self.is_logged_in_to_registry():
-                print("Docker appears to be logged in to the registry.")
+                Logger.success("Docker appears to be logged in to the registry.")
                 return
         except Exception as e:
-            print(f"Warning while checking login status: {e}")
+            Logger.warning(f"Warning while checking login status: {e}")
 
-        # Prompt the user to login
-        print(f"You are not logged into {self.registry}. Attempting interactive 'docker login'.")
-        login_cmd = ['docker', 'login', self.registry]
-        # run_command will add sudo if necessary and will run interactively
+        # Prompt the user for credentials
+        Logger.warning(f"You are not logged into {self.registry}.")
+        print()
+        
+        import getpass
+        username = input(f"🔐 Enter username for {self.registry}: ").strip()
+        password = getpass.getpass(f"🔐 Enter password for {self.registry}: ")
+        
+        # Use docker login with credentials
+        login_cmd = ['docker', 'login', '--username', username, '--password-stdin', self.registry]
         try:
-            self.run_command(login_cmd, cwd=self.challenge_dir)
+            # Pass password via stdin
+            self.run_command(login_cmd, input_text=password)
+            Logger.success("Successfully logged into Docker registry.")
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Docker login failed: {e}")
+            Logger.error(f"Docker login failed: {e.stderr.strip()}")
+            raise RuntimeError(f"Docker login failed: {e.stderr.strip()}")
 
     def substitute_docker_compose_images(self, compose_data: Dict[str, Any], image_substitutions: Dict[str, str]) -> Dict[str, Any]:
         """Update the docker-compose data with new image tags"""
-        print("Substituting docker-compose with new image tags...")
+        Logger.info("Substituting docker-compose with new image tags...")
         
         # Make a deep copy to avoid modifying original
         updated_compose = yaml.safe_load(yaml.dump(compose_data))
@@ -225,13 +312,13 @@ class ChallengeBuilder:
                     del service_config['build']
                 
                 service_config['image'] = new_image
-                print(f"  {service_name}: {new_image}")
+                Logger.info(f"  {service_name}: {new_image}")
         
         return updated_compose
 
     def create_build_directory(self):
         """Create and populate the .build directory"""
-        print("Creating .build directory...")
+        Logger.step("Creating .build directory...")
         
         # Remove existing build directory if it exists
         if self.build_dir.exists():
@@ -239,22 +326,22 @@ class ChallengeBuilder:
         
         # Create new build directory
         self.build_dir.mkdir()
-        print(f"Created {self.build_dir}")
+        Logger.success(f"Created {self.build_dir}")
 
     def copy_files_to_build(self, updated_compose_data: Dict[str, Any]):
         """Copy necessary files to the .build directory"""
-        print("Copying files to .build directory...")
+        Logger.info("Copying files to .build directory...")
         
         # Copy docker-compose.yml as docker-compose.yaml
         docker_compose_dest = self.build_dir / "docker-compose.yaml"
         with open(docker_compose_dest, 'w') as f:
             yaml.dump(updated_compose_data, f, default_flow_style=False)
-        print(f"Copied docker-compose.yml -> {docker_compose_dest}")
+        Logger.info(f"Copied docker-compose.yml -> {docker_compose_dest}")
         
         # Copy challenge.yml as challenge.yaml
         challenge_dest = self.build_dir / "challenge.yaml"
         shutil.copy2(self.challenge_yml_path, challenge_dest)
-        print(f"Copied challenge.yml -> {challenge_dest}")
+        Logger.info(f"Copied challenge.yml -> {challenge_dest}")
         
         # Copy Pulumi template files
         template_files = ['Pulumi.yaml', 'main.go', 'go.mod', 'go.sum']
@@ -263,13 +350,13 @@ class ChallengeBuilder:
             dest = self.build_dir / filename
             if src.exists():
                 shutil.copy2(src, dest)
-                print(f"Copied {src} -> {dest}")
+                Logger.info(f"Copied {src} -> {dest}")
             else:
-                print(f"Warning: {src} not found, skipping")
+                Logger.warning(f"Warning: {src} not found, skipping")
 
     def build_go_program(self):
         """Compile the Go program in the .build directory"""
-        print("Building Go program...")
+        Logger.build("Building Go program...")
         self.run_command(['go', 'mod', 'tidy'], cwd=self.build_dir)
         # CGO_ENABLED=0 for static binary
         os.environ['CGO_ENABLED'] = '0'
@@ -281,11 +368,11 @@ class ChallengeBuilder:
         main_binary = self.build_dir / "main"
         if not main_binary.exists():
             raise RuntimeError("Go build failed: main binary not found")
-        print("Go program built successfully")
+        Logger.success("Go program built successfully")
 
     def push_to_oci_registry(self):
         """Push the build directory to OCI registry"""
-        print("Pushing to OCI registry...")
+        Logger.push("Pushing to OCI registry...")
         
         # Use the first service name from docker-compose for the OCI package name
         # This is a simplification - you might want to use the challenge name instead
@@ -315,27 +402,30 @@ class ChallengeBuilder:
         
         try:
             self.run_command(push_cmd, cwd=self.build_dir)
-            print(f"Successfully pushed to {oci_tag}")
+            Logger.success(f"Successfully pushed to {oci_tag}")
         except subprocess.CalledProcessError as e:
-            print(f"Warning: OCI push failed. You may need to install OCI CLI tools or adjust the command.")
-            print(f"Manual push command: cd {self.build_dir} && oci push {oci_tag} .")
+            Logger.warning(f"OCI push failed. You may need to install OCI CLI tools or adjust the command.")
+            Logger.info(f"Manual push command: cd {self.build_dir} && oras push --insecure {oci_tag} main:application/vnd.ctfer-io.file Pulumi.yaml:application/vnd.ctfer-io.file")
             raise
 
     def cleanup(self):
         """Remove the .build directory"""
-        print("Cleaning up...")
+        Logger.info("Cleaning up...")
         if self.build_dir.exists():
             shutil.rmtree(self.build_dir)
-            print(f"Removed {self.build_dir}")
+            Logger.success(f"Removed {self.build_dir}")
 
     def build(self):
         """Execute the complete build process"""
         try:
-            print(f"Building challenge in {self.challenge_dir}")
-            print(f"Subdomain: {self.subdomain}")
-            print(f"Registry: {self.registry}")
-            print(f"Template: {self.template_folder}")
+            Logger.info(f"Building challenge in {self.challenge_dir}")
+            Logger.info(f"Subdomain: {self.subdomain}")
+            Logger.info(f"Registry: {self.registry}")
+            Logger.info(f"Template: {self.template_folder}")
             print()
+            
+            # Perform sanity checks
+            self.perform_sanity_checks()
             
             # Step 1-3: Read docker-compose, build images, push images, substitute
             compose_data = self.read_docker_compose()
@@ -354,10 +444,10 @@ class ChallengeBuilder:
             # Step 11: Push to OCI registry
             self.push_to_oci_registry()
             
-            print("\n✅ Challenge build completed successfully!")
+            Logger.success("Challenge build completed successfully!")
             
         except Exception as e:
-            print(f"\n❌ Build failed: {e}")
+            Logger.error(f"Build failed: {e}")
             raise
         finally:
             # Step 12: Cleanup
@@ -381,13 +471,13 @@ def main():
 
     # Both docker-compose.yml and challenge.yml must be present to build a challenge
     if not (builder.has_compose and builder.has_challenge):
-        print("docker-compose.yml and/or challenge.yml not found in the current directory. Nothing to do.")
+        Logger.warning("docker-compose.yml and/or challenge.yml not found in the current directory. Nothing to do.")
         sys.exit(0)
 
     try:
         builder.build()
     except Exception as e:
-        print(f"Build failed: {e}")
+        Logger.error(f"Build failed: {e}")
         sys.exit(1)
 
 

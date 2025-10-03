@@ -22,6 +22,8 @@ classifiers = [
 ]
 dependencies = [
     "PyYAML>=6.0",
+    "colorama>=0.4.6",
+    "requests>=2.25.0",
 ]
 
 [project.scripts]
