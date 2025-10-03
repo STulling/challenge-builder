@@ -26,7 +26,7 @@ colorama.init(autoreset=True)
 class Logger:
     @staticmethod
     def info(message: str):
-        print(f"{Fore.BLUE}ℹ️  {message}{Style.RESET_ALL}")
+        print(f"{Fore.LIGHTBLUE_EX}ℹ️  {message}{Style.RESET_ALL}")
 
     @staticmethod
     def success(message: str):
@@ -50,11 +50,11 @@ class Logger:
 
     @staticmethod
     def push(message: str):
-        print(f"{Fore.BLUE}📤 {message}{Style.RESET_ALL}")
+        print(f"{Fore.LIGHTBLUE_EX}📤 {message}{Style.RESET_ALL}")
 
     @staticmethod
     def pull(message: str):
-        print(f"{Fore.BLUE}📥 {message}{Style.RESET_ALL}")
+        print(f"{Fore.LIGHTBLUE_EX}📥 {message}{Style.RESET_ALL}")
 
 
 class ChallengeBuilder:
@@ -106,18 +106,25 @@ class ChallengeBuilder:
     def perform_sanity_checks(self):
         """Perform sanity checks before building"""
         Logger.info("Performing sanity checks...")
+        should_exit = False
         
         # Check registry connectivity
         if not self.check_registry_connectivity():
-            Logger.warning(f"⚠️  Registry {self.registry} is not reachable. Build may fail.")
+            Logger.warning(f"Registry {self.registry} is not reachable. Build may fail.")
+            should_exit = True
         else:
             Logger.success(f"Registry {self.registry} is reachable.")
         
         # Check CTF website
         if not self.check_ctf_website():
-            Logger.warning(f"⚠️  CTF website {self.ctf_domain} is not responding. Build may fail.")
+            Logger.warning(f"CTF website {self.ctf_domain} is not responding. Build may fail.")
+            should_exit = True
         else:
             Logger.success(f"CTF website {self.ctf_domain} is up.")
+        
+        if should_exit:
+            Logger.error("One or more sanity checks failed. Please resolve the issues and try again.")
+            sys.exit(1)
         
         print()
 
