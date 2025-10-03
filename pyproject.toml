@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctf-challenge-builder"
-version = "0.1.4"
+version = "0.1.5"
 description = "Build challenge images and create OCI deployment packages for CTF challenges"
 readme = "README.md"
 license = "MIT"
@@ -33,4 +33,4 @@ build-challenge = "ctf_challenge_builder:main"
 packages = ["ctf_challenge_builder"]
 
 [tool.setuptools.package-data]
-ctf_challenge_builder = ["pulumi-template/**/*"]
+ctf_challenge_builder = ["pulumi-template/*"]
