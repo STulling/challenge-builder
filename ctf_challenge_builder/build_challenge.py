@@ -76,7 +76,7 @@ class ChallengeBuilder:
             self.use_sudo = False
         
         # Default template folder
-        self.template_folder = Path(__file__) / "pulumi-template"
+        self.template_folder = Path(__file__).parent / "pulumi-template"
             
         # Paths to expected files (we will check existence later and exit gracefully)
         self.docker_compose_path = self.challenge_dir / "docker-compose.yml"
