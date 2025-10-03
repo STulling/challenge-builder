@@ -34,6 +34,10 @@ class Logger:
         print(f"{Fore.GREEN}✅ {message}{Style.RESET_ALL}")
 
     @staticmethod
+    def final(message: str):
+        print(f"{Back.GREEN}{Fore.BLACK}🎉 {message} {Style.RESET_ALL}")
+
+    @staticmethod
     def warning(message: str):
         print(f"{Fore.YELLOW}⚠️  {message}{Style.RESET_ALL}")
 
@@ -65,6 +69,7 @@ class ChallengeBuilder:
         self.ctf_domain = ctf_domain
         self.registry = "registry." + ctf_domain  # e.g., registry.ctf.christmas
         self.build_dir = self.challenge_dir / ".build"
+        self.oci_digest = None  # To store the digest from oras push
         # Detect if we should prefix docker commands with sudo (non-Windows, non-root)
         self.use_sudo = False
         try:
@@ -378,26 +383,9 @@ class ChallengeBuilder:
             raise RuntimeError("Go build failed: main binary not found")
         Logger.success("Go program built successfully")
 
-    def push_to_oci_registry(self):
+    def push_to_oci_registry(self, package_name: str):
         """Push the build directory to OCI registry"""
         Logger.push("Pushing to OCI registry...")
-        
-        # Use the first service name from docker-compose for the OCI package name
-        # This is a simplification - you might want to use the challenge name instead
-        with open(self.docker_compose_path, 'r') as f:
-            compose_data = yaml.safe_load(f)
-        
-        services = list(compose_data.get('services', {}).keys())
-        if not services:
-            raise ValueError("No services found in docker-compose.yml")
-        
-        # Use challenge name from challenge.yml if available, otherwise first service name
-        try:
-            with open(self.challenge_yml_path, 'r') as f:
-                challenge_data = yaml.safe_load(f)
-            package_name = challenge_data.get('name', services[0])
-        except:
-            package_name = services[0]
         
         oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
         
@@ -409,7 +397,13 @@ class ChallengeBuilder:
                     'Pulumi.yaml:application/vnd.ctfer-io.file']
         
         try:
-            self.run_command(push_cmd, cwd=self.build_dir)
+            result = self.run_command(push_cmd, cwd=self.build_dir)
+            # Parse the digest from the output
+            output_lines = result.stdout.split('\n')
+            for line in output_lines:
+                if line.startswith('Digest:'):
+                    self.oci_digest = line.split(':', 1)[1].strip()
+                    break
             Logger.success(f"Successfully pushed to {oci_tag}")
         except subprocess.CalledProcessError as e:
             Logger.warning(f"OCI push failed. You may need to install OCI CLI tools or adjust the command.")
@@ -442,6 +436,17 @@ class ChallengeBuilder:
             image_substitutions = self.build_and_push_images(compose_data)
             updated_compose_data = self.substitute_docker_compose_images(compose_data, image_substitutions)
             
+            # Determine package name for OCI registry
+            services = list(compose_data.get('services', {}).keys())
+            if not services:
+                raise ValueError("No services found in docker-compose.yml")
+            # Use challenge name from challenge.yml if available, otherwise first service name
+            try:
+                challenge_data = self.read_challenge_yaml()
+                package_name = challenge_data.get('name', services[0])
+            except:
+                package_name = services[0]
+            
             # Step 4-8: Create .build directory and copy files
             self.create_build_directory()
             self.copy_files_to_build(updated_compose_data)
@@ -450,9 +455,17 @@ class ChallengeBuilder:
             self.build_go_program()
             
             # Step 11: Push to OCI registry
-            self.push_to_oci_registry()
+            self.push_to_oci_registry(package_name)
             
             Logger.success("Challenge build completed successfully!")
+            
+            # Print the complete registry package with digest
+            if self.oci_digest:
+                oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
+                complete_package = f"{oci_tag}@{self.oci_digest}"
+                Logger.final(f"Complete registry package: {complete_package}")
+            else:
+                Logger.warning("Could not capture OCI digest from push output")
             
         except Exception as e:
             Logger.error(f"Build failed: {e}")
