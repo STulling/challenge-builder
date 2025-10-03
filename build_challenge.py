@@ -21,6 +21,7 @@ import requests
 
 # Initialize colorama
 colorama.init(autoreset=True)
+requests.packages.urllib3.disable_warnings(category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 
 class Logger:
@@ -97,7 +98,7 @@ class ChallengeBuilder:
     def check_ctf_website(self) -> bool:
         """Check if the CTF website is up"""
         try:
-            response = requests.get(f"https://{self.ctf_domain}", timeout=10, verify=False)
+            response = requests.get(f"https://{self.subdomain + '.' + self.ctf_domain}", timeout=10, verify=False)
             return response.status_code == 200
         except requests.RequestException:
             pass
@@ -117,11 +118,11 @@ class ChallengeBuilder:
         
         # Check CTF website
         if not self.check_ctf_website():
-            Logger.warning(f"CTF website {self.ctf_domain} is not responding. Build may fail.")
+            Logger.warning(f"CTF website {self.subdomain + '.' + self.ctf_domain} is not responding. Build may fail.")
             should_exit = True
         else:
-            Logger.success(f"CTF website {self.ctf_domain} is up.")
-        
+            Logger.success(f"CTF website {self.subdomain + '.' + self.ctf_domain} is up.")
+
         if should_exit:
             Logger.error("One or more sanity checks failed. Please resolve the issues and try again.")
             sys.exit(1)
