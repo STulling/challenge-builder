@@ -3,7 +3,7 @@
 Challenge Builder Script
 
 This script builds challenge images and creates OCI deployment packages.
-Usage: build-challenge --subdomain <subdomain> --ctf-domain <ctf-domain>
+Usage: build-challenge --ctf-domain <ctf-domain>
 """
 
 import argparse
@@ -18,11 +18,11 @@ from typing import Dict, List, Any, Optional
 
 
 class ChallengeBuilder:
-    def __init__(self, challenge_dir: str, subdomain: str, ctf_domain: str, template_folder: str = None):
+    def __init__(self, challenge_dir: str, subdomain: str, ctf_domain: str):
         self.challenge_dir = Path(challenge_dir).resolve()
         self.subdomain = subdomain
         self.ctf_domain = ctf_domain
-        self.registry = "registry.ctf.christmas"
+        self.registry = "registry." + ctf_domain  # e.g., registry.ctf.christmas
         self.build_dir = self.challenge_dir / ".build"
         # Detect if we should prefix docker commands with sudo (non-Windows, non-root)
         self.use_sudo = False
@@ -34,11 +34,8 @@ class ChallengeBuilder:
             # If os.geteuid isn't available or any error occurs, default to False
             self.use_sudo = False
         
-        # Default template folder if not provided
-        if template_folder is None:
-            self.template_folder = Path(__file__).parent / "pulumi-template"
-        else:
-            self.template_folder = Path(template_folder)
+        # Default template folder
+        self.template_folder = Path(__file__).parent / "pulumi-template"
             
         # Paths to expected files (we will check existence later and exit gracefully)
         self.docker_compose_path = self.challenge_dir / "docker-compose.yml"
@@ -371,17 +368,15 @@ def main():
     parser = argparse.ArgumentParser(description="Build challenge images and create OCI deployment packages")
     parser.add_argument("--ctf-domain", required=True, help="CTF domain for the challenge")
     parser.add_argument("--challenge-dir", default=".", help="Path to challenge directory (default: current directory)")
-    parser.add_argument("--template-folder", help="Path to Pulumi template folder (default: script_dir/pulumi-template)")
-    
+
     args = parser.parse_args()
     subdomain = args.ctf_domain.split('.')[0]
     ctf_domain = ".".join(args.ctf_domain.split('.')[1:])
     
     builder = ChallengeBuilder(
         challenge_dir=args.challenge_dir,
-        subdomain=args.subdomain,
-        ctf_domain=args.ctf_domain,
-        template_folder=args.template_folder
+        subdomain=subdomain,
+        ctf_domain=ctf_domain
     )
 
     # Both docker-compose.yml and challenge.yml must be present to build a challenge
