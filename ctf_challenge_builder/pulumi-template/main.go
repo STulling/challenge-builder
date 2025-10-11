@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -121,11 +122,11 @@ func main() {
 		if err != nil {
 			return err
 		}
-		var portName string // Something like "80/tcp"
-		portName = dcfg.Services[firstService].Ports[0] + "/" + "TCP"
+		var portName string // Something like "80/TCP"
+		portName = fmt.Sprintf("%s/%s", parsePort(dcfg.Services[firstService].Ports[0]), "TCP")
 		// if the challenge is HTTP, set the ConnectionInfo to the URL of the first service
 		if cfg.IsHTTP {
-			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)))
+			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
 		} else {
 			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
 		}
