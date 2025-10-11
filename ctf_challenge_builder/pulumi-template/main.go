@@ -89,7 +89,8 @@ func main() {
 	}
 	var firstService string
 	for name, svc := range dcfg.Services {
-		if len(svc.Ports) > 0 {
+		// if name start with entry-
+		if strings.HasPrefix(name, "entry-") && len(svc.Ports) > 0 {
 			firstService = name
 			break
 		}
@@ -123,7 +124,7 @@ func main() {
 			return err
 		}
 		var portName string // Something like "80/TCP"
-		portName = fmt.Sprintf("%s/%s", parsePort(dcfg.Services[firstService].Ports[0]), "TCP")
+		portName = fmt.Sprintf("%d/%s", parsePort(dcfg.Services[firstService].Ports[0]), "TCP")
 		// if the challenge is HTTP, set the ConnectionInfo to the URL of the first service
 		if cfg.IsHTTP {
 			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
