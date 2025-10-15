@@ -368,14 +368,15 @@ class CTFdClient:
         for spec in attachments:
             with spec.path.open("rb") as handle:
                 files = {"file": (spec.name, handle)}
-                data = None
-                upload_url = f"/api/v1/challenges/{challenge_id}/files"
+                form_data: Dict[str, Any] = {
+                    "challenge": str(challenge_id),
+                    "type": "challenge",
+                }
                 if self._csrf_token and "Authorization" not in self._session.headers:
-                    data = {"nonce": self._csrf_token}
-                    upload_url = f"/challenges/{challenge_id}/files"
+                    form_data["nonce"] = self._csrf_token
                 response = self._session.post(
-                    self._url(upload_url),
-                    data=data,
+                    self._url("/api/v1/files"),
+                    data=form_data,
                     files=files,
                     timeout=self._timeout,
                 )
