@@ -322,11 +322,16 @@ class CTFdClient:
                 "type": flag.get("type", "static"),
                 "data": flag.get("data"),
             }
-            self._session.post(
-                self._url(f"/api/v1/challenges/{challenge_id}/flags"),
+            response = self._session.post(
+                self._url("/api/v1/flags"),
                 json=payload,
                 timeout=self._timeout,
             )
+            upload_data = self._extract_json(response)
+            if not upload_data.get("success"):
+                raise CTFdClientError(
+                    f"Failed to create flag: {upload_data}"
+                )
 
     def _sync_hints(self, challenge_id: int, hints: List[Dict[str, Any]]):
         if hints is None:
@@ -349,11 +354,16 @@ class CTFdClient:
             }
             if hint.get("type"):
                 payload["type"] = hint["type"]
-            self._session.post(
-                self._url(f"/api/v1/challenges/{challenge_id}/hints"),
+            response = self._session.post(
+                self._url("/api/v1/hints"),
                 json=payload,
                 timeout=self._timeout,
             )
+            upload_data = self._extract_json(response)
+            if not upload_data.get("success"):
+                raise CTFdClientError(
+                    f"Failed to create hint: {upload_data}"
+                )
 
     def _sync_files(self, challenge_id: int, attachments: List[AttachmentSpec]):
         response = self._session.get(
@@ -411,7 +421,9 @@ class CTFdClient:
         data = self._extract_json(response)
         if not data.get("success"):
             return None
-        return data.get("data")
+        challenge = data.get("data", {})
+        challenge["tags"] = self._fetch_challenge_tags(challenge_id)
+        return challenge
 
     def _find_challenge(
         self,
@@ -512,3 +524,16 @@ class CTFdClient:
                 headers={"Content-Type": "application/json"},
                 json={},
             )
+
+    def _fetch_challenge_tags(self, challenge_id: int) -> List[Dict[str, Any]]:
+        try:
+            response = self._session.get(
+                self._url(f"/api/v1/challenges/{challenge_id}/tags"),
+                timeout=self._timeout,
+            )
+            data = self._extract_json(response)
+            if data.get("success"):
+                return data.get("data", [])
+        except Exception:
+            pass
+        return []
