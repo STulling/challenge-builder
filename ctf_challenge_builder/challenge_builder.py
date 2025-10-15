@@ -3,28 +3,55 @@
 Challenge Builder module
 """
 
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
-import yaml
+import zipfile
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-import requests
+from typing import Any, Dict, List, Optional, Tuple
 
+import requests
+import yaml
+
+from .ctfd_client import (
+    AttachmentSpec,
+    CTFdAuthError,
+    CTFdClient,
+    CTFdClientError,
+    ChallengeSyncResult,
+    calculate_sync_hash,
+)
 from .logger import Logger
 
 requests.packages.urllib3.disable_warnings(category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 
 class ChallengeBuilder:
-    def __init__(self, challenge_dir: str, subdomain: str, ctf_domain: str):
+    def __init__(
+        self,
+        challenge_dir: str,
+        subdomain: str,
+        ctf_domain: str,
+        ctfd_url: Optional[str] = None,
+        ctfd_token: Optional[str] = None,
+        ctfd_username: Optional[str] = None,
+        ctfd_password: Optional[str] = None,
+        ctfd_verify_ssl: bool = True,
+    ):
         self.challenge_dir = Path(challenge_dir).resolve()
         self.subdomain = subdomain
         self.ctf_domain = ctf_domain
         self.registry = "registry." + ctf_domain  # e.g., registry.ctf.christmas
         self.build_dir = self.challenge_dir / ".build"
+        self.dist_dir = self.challenge_dir / "dist"
         self.oci_digest = None  # To store the digest from oras push
+        self.ctfd_url = ctfd_url
+        self.ctfd_token = ctfd_token
+        self.ctfd_username = ctfd_username
+        self.ctfd_password = ctfd_password
+        self.ctfd_verify_ssl = ctfd_verify_ssl
         # Detect if we should prefix docker commands with sudo (non-Windows, non-root)
         self.use_sudo = False
         try:
@@ -365,6 +392,255 @@ class ChallengeBuilder:
             Logger.info(f"Manual push command: cd {self.build_dir} && oras push --insecure {oci_tag} main:application/vnd.ctfer-io.file Pulumi.yaml:application/vnd.ctfer-io.file")
             raise
 
+    @staticmethod
+    def _sanitize_slug(raw: str) -> str:
+        sanitized = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in raw.lower())
+        sanitized = sanitized.strip("-")
+        return sanitized or "challenge"
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        sha = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                sha.update(chunk)
+        return sha.hexdigest()
+
+    def _bundle_dist_path(self, slug: str) -> Path:
+        self.dist_dir.mkdir(exist_ok=True)
+        return self.dist_dir / f"{slug}.zip.tmp"
+
+    def _add_path_to_zip(self, zip_handle: zipfile.ZipFile, source: Path):
+        source = source.resolve()
+        if source.is_dir():
+            for file_path in sorted(source.rglob("*")):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(self.challenge_dir)
+                    zip_handle.write(file_path, arcname.as_posix())
+        elif source.is_file():
+            arcname = source.relative_to(self.challenge_dir)
+            zip_handle.write(source, arcname.as_posix())
+        else:
+            raise FileNotFoundError(f"Bundle entry not found: {source}")
+
+    def _create_offline_bundle(
+        self,
+        include_items: List[str],
+        slug: str,
+    ) -> Tuple[Path, str]:
+        if not include_items:
+            raise ValueError("ctfd.bundle.include must list at least one file or directory")
+
+        sanitized_slug = self._sanitize_slug(slug)
+        # Clean previous bundles for this slug to keep the dist/ folder tidy
+        if self.dist_dir.exists():
+            for old_zip in self.dist_dir.glob(f"{sanitized_slug}-*.zip"):
+                old_zip.unlink()
+
+        tmp_zip_path = self._bundle_dist_path(sanitized_slug)
+        with zipfile.ZipFile(tmp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
+            for item in include_items:
+                entry_path = (self.challenge_dir / item).resolve()
+                self._add_path_to_zip(zip_handle, entry_path)
+
+        digest = self._sha256_file(tmp_zip_path)
+        final_name = f"{sanitized_slug}-{digest[:8]}.zip"
+        final_path = self.dist_dir / final_name
+        tmp_zip_path.replace(final_path)
+        Logger.success(f"Created offline bundle {final_path.relative_to(self.challenge_dir)}")
+        return final_path, sanitized_slug
+
+    def _collect_ctfd_attachments(self, ctfd_cfg: Dict[str, Any]) -> List[AttachmentSpec]:
+        attachments: List[AttachmentSpec] = []
+        for entry in ctfd_cfg.get("files", []):
+            if isinstance(entry, str):
+                rel_path = entry
+                display_name = None
+            elif isinstance(entry, dict):
+                rel_path = entry.get("path")
+                display_name = entry.get("name")
+            else:
+                raise ValueError(f"Unsupported attachment entry in ctfd.files: {entry}")
+
+            if not rel_path:
+                continue
+
+            candidate = (self.challenge_dir / rel_path).resolve()
+            attachments.append(AttachmentSpec.from_path(candidate, display_name))
+        return attachments
+
+    def _build_ctfd_payload(
+        self,
+        challenge_data: Dict[str, Any],
+        ctfd_cfg: Dict[str, Any],
+        package_name: str,
+        oci_reference: Optional[str],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        payload.update(ctfd_cfg.get("challenge", {}))
+
+        fallback_keys = [
+            "name",
+            "category",
+            "description",
+            "connection_info",
+            "state",
+            "value",
+            "initial",
+            "minimum",
+            "decay",
+            "requirements",
+            "type",
+        ]
+
+        for key in fallback_keys:
+            if key not in payload and key in ctfd_cfg:
+                payload[key] = ctfd_cfg[key]
+            elif key not in payload and key in challenge_data:
+                payload[key] = challenge_data[key]
+
+        payload["type"] = ctfd_cfg.get("type", payload.get("type", "dynamic"))
+
+        if payload["type"] == "dynamic_iac":
+            dynamic_cfg = dict(ctfd_cfg.get("dynamic_iac", {}))
+            payload.update(dynamic_cfg)
+            if not payload.get("scenario") and oci_reference:
+                payload["scenario"] = oci_reference
+            elif not payload.get("scenario"):
+                scenario_fallback = challenge_data.get("scenario")
+                if scenario_fallback:
+                    payload["scenario"] = scenario_fallback
+        elif payload["type"] == "dynamic":
+            dynamic_cfg = dict(ctfd_cfg.get("dynamic", {}))
+            payload.update(dynamic_cfg)
+
+        payload.setdefault("name", challenge_data.get("name") or package_name)
+        payload.setdefault("category", challenge_data.get("category"))
+        if "description" not in payload and challenge_data.get("description"):
+            payload["description"] = challenge_data["description"]
+        if "connection_info" not in payload and challenge_data.get("connection_info"):
+            payload["connection_info"] = challenge_data["connection_info"]
+
+        flags = ctfd_cfg.get("flags")
+        if flags is None and "flags" in challenge_data:
+            flags = challenge_data["flags"]
+        payload["flags"] = flags or []
+
+        hints = ctfd_cfg.get("hints", [])
+        payload["hints"] = hints
+
+        requirements = ctfd_cfg.get("requirements")
+        if requirements is None and "requirements" in challenge_data:
+            requirements = challenge_data["requirements"]
+        if requirements:
+            payload["requirements"] = requirements
+
+        extras = ctfd_cfg.get("extra_fields", {})
+        if isinstance(extras, dict):
+            for key, value in extras.items():
+                if value is not None:
+                    payload[key] = value
+
+        return {key: value for key, value in payload.items() if value is not None}
+
+    def _log_ctfd_result(self, result: ChallengeSyncResult):
+        if result.status == "skipped":
+            Logger.info(f"CTFd challenge unchanged (id={result.challenge_id}).")
+        elif result.status == "updated":
+            Logger.success(f"CTFd challenge updated (id={result.challenge_id}).")
+        elif result.status == "created":
+            Logger.success(f"CTFd challenge created (id={result.challenge_id}).")
+
+    def sync_ctfd(
+        self,
+        challenge_data: Dict[str, Any],
+        package_name: str,
+        oci_reference: Optional[str],
+    ):
+        ctfd_cfg = challenge_data.get("ctfd")
+        if not ctfd_cfg:
+            return
+
+        if not self.ctfd_url:
+            Logger.warning(
+                "CTFd configuration present in challenge.yml but no --ctfd-url provided. Skipping CTFd sync."
+            )
+            return
+
+        if not (self.ctfd_token or (self.ctfd_username and self.ctfd_password)):
+            Logger.warning(
+                "CTFd configuration present but no credentials supplied. Provide an API token or username/password to enable sync."
+            )
+            return
+
+        bundle_cfg = ctfd_cfg.get("bundle")
+        if bundle_cfg:
+            if not isinstance(bundle_cfg, dict):
+                raise ValueError("ctfd.bundle must be a mapping with an 'include' list")
+            include_items = bundle_cfg.get("include", [])
+            if not isinstance(include_items, list):
+                raise ValueError("ctfd.bundle.include must be a list of paths")
+            slug_source = (
+                bundle_cfg.get("slug")
+                or ctfd_cfg.get("slug")
+                or challenge_data.get("slug")
+                or challenge_data.get("name")
+                or package_name
+            )
+            bundle_path, sanitized_slug = self._create_offline_bundle(include_items, slug_source)
+            bundle_entry = {
+                "path": str(bundle_path.relative_to(self.challenge_dir)),
+                "name": bundle_cfg.get("name", bundle_path.name),
+            }
+            existing_files = ctfd_cfg.get("files", [])
+            if existing_files is None:
+                existing_files = []
+            elif not isinstance(existing_files, list):
+                raise ValueError("ctfd.files must be a list when using bundle support")
+            filtered_files = []
+            for item in existing_files:
+                item_path_str: Optional[str] = None
+                if isinstance(item, str):
+                    item_path_str = item
+                elif isinstance(item, dict):
+                    item_path_str = item.get("path")
+                if item_path_str:
+                    normalized = item_path_str.replace("\\", "/")
+                    if f"dist/{sanitized_slug}-" in normalized:
+                        continue
+                filtered_files.append(item)
+            ctfd_cfg["files"] = [bundle_entry] + filtered_files
+
+        try:
+            attachments = self._collect_ctfd_attachments(ctfd_cfg)
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Attachment not found for CTFd upload: {exc}") from exc
+
+        payload = self._build_ctfd_payload(challenge_data, ctfd_cfg, package_name, oci_reference)
+        builder_hash = calculate_sync_hash(payload, attachments)
+
+        client = CTFdClient(
+            base_url=self.ctfd_url,
+            token=self.ctfd_token,
+            username=self.ctfd_username,
+            password=self.ctfd_password,
+            verify_ssl=self.ctfd_verify_ssl,
+        )
+
+        try:
+            result = client.sync_challenge(
+                payload=payload,
+                attachments=attachments,
+                builder_hash=builder_hash,
+                challenge_id=ctfd_cfg.get("id"),
+                slug=ctfd_cfg.get("slug"),
+                name=payload.get("name"),
+                tags=ctfd_cfg.get("tags"),
+            )
+            self._log_ctfd_result(result)
+        except (CTFdAuthError, CTFdClientError) as exc:
+            raise RuntimeError(f"Failed to synchronise challenge with CTFd: {exc}") from exc
+
     def cleanup(self):
         """Remove the .build directory"""
         Logger.info("Cleaning up...")
@@ -396,10 +672,11 @@ class ChallengeBuilder:
             if not services:
                 raise ValueError("No services found in docker-compose.yml")
             # Use challenge name from challenge.yml if available, otherwise first service name
+            challenge_data = {}
             try:
                 challenge_data = self.read_challenge_yaml()
                 package_name = challenge_data.get('name', services[0])
-            except:
+            except Exception:
                 package_name = services[0]
             
             # Step 4-8: Create .build directory and copy files
@@ -411,16 +688,20 @@ class ChallengeBuilder:
             
             # Step 11: Push to OCI registry
             self.push_to_oci_registry(package_name)
-            
-            Logger.success("Challenge build completed successfully!")
-            
-            # Print the complete registry package with digest
+
+            complete_package = None
             if self.oci_digest:
                 oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
                 complete_package = f"{oci_tag}@{self.oci_digest}"
-                Logger.final(f"Complete registry package: {complete_package}")
             else:
                 Logger.warning("Could not capture OCI digest from push output")
+
+            self.sync_ctfd(challenge_data, package_name, complete_package)
+            
+            Logger.success("Challenge build completed successfully!")
+
+            if complete_package:
+                Logger.final(f"Complete registry package: {complete_package}")
             
         except Exception as e:
             Logger.error(f"Build failed: {e}")
