@@ -379,11 +379,18 @@ class CTFdClient:
                     files=files,
                     timeout=self._timeout,
                 )
-                upload_data = self._extract_json(response)
-                if not upload_data.get("success"):
-                    raise CTFdClientError(
-                        f"Failed to upload attachment {spec.name}: {upload_data}"
-                    )
+                content_type = response.headers.get("Content-Type", "")
+                if "json" in content_type.lower():
+                    upload_data = self._extract_json(response)
+                    if not upload_data.get("success"):
+                        raise CTFdClientError(
+                            f"Failed to upload attachment {spec.name}: {upload_data}"
+                        )
+                else:
+                    if not response.ok:
+                        raise CTFdClientError(
+                            f"Failed to upload attachment {spec.name}: {response.text}"
+                        )
 
     def _filter_challenge_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         ignored_keys = {"flags", "files", "hints", "tags"}
