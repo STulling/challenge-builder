@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -85,7 +86,6 @@ class CTFdClient:
     """Small helper for synchronising challenges with CTFd."""
 
     BUILDER_TAG_PREFIX = "builder-sync:"
-    _LOGIN_NONCE_RE = re.compile(r'name="nonce"\s+value="([a-f0-9]+)"', re.IGNORECASE)
     _JS_NONCE_RE = re.compile(r"'csrfNonce'\s*:\s*\"([a-f0-9]+)\"", re.IGNORECASE)
 
     def __init__(
@@ -188,6 +188,20 @@ class CTFdClient:
             self._authenticated = True
             return
         raise CTFdAuthError("Either an API token or username/password must be provided")
+
+    class _NonceHTMLParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.value: Optional[str] = None
+
+        def handle_starttag(self, tag: str, attrs):
+            if self.value is not None:
+                return
+            if tag.lower() != "input":
+                return
+            attr_map = {key.lower(): val for key, val in attrs}
+            if attr_map.get("name") == "nonce" and attr_map.get("value"):
+                self.value = attr_map["value"]
 
     def _login_with_password(self):
         login_url = self._url("/login")
@@ -457,7 +471,11 @@ class CTFdClient:
 
     @classmethod
     def _extract_login_nonce(cls, html: str) -> Optional[str]:
-        match = cls._LOGIN_NONCE_RE.search(html)
+        parser = cls._NonceHTMLParser()
+        parser.feed(html)
+        if parser.value:
+            return parser.value
+        match = cls._JS_NONCE_RE.search(html)
         if match:
             return match.group(1)
         return None
@@ -468,9 +486,10 @@ class CTFdClient:
             match = self._JS_NONCE_RE.search(response.text)
             if match:
                 return match.group(1)
-            hidden = self._LOGIN_NONCE_RE.search(response.text)
-            if hidden:
-                return hidden.group(1)
+            parser = self._NonceHTMLParser()
+            parser.feed(response.text)
+            if parser.value:
+                return parser.value
         return None
 
     def _delete(self, url: str):
