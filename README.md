@@ -20,9 +20,11 @@ build-challenge --ctf-domain <ctf-domain>
 
 For classic (non-IaC) dynamic challenges you can omit `docker-compose.yml`; the builder will skip image/OCI packaging and only perform the CTFd synchronisation.
 
+`<ctf-domain>` should be the host where the challenge will run (for example, `web.ctf.example`); you may include an `https://` scheme if that is more convenient.
+
 ### Optional: Sync with CTFd
 
-Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built:
+Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built. `--ctfd-url` defaults to `https://<ctf-domain>` when omitted:
 
 ```bash
 build-challenge \

@@ -10,6 +10,8 @@ import argparse
 import os
 import sys
 
+from urllib.parse import urlsplit
+
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
 
@@ -23,11 +25,24 @@ def _env_or_default(value: str, default: bool) -> bool:
     return default
 
 
+def _strip_scheme(domain: str) -> str:
+    parsed = urlsplit(domain if domain.startswith(("http://", "https://")) else f"https://{domain}")
+    return parsed.netloc
+
+
+def _normalize_url(value: str) -> str:
+    if not value:
+        return value
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    return value.rstrip("/")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build challenge images and create OCI deployment packages")
-    parser.add_argument("--ctf-domain", required=True, help="CTF domain for the challenge")
+    parser.add_argument("--ctf-domain", required=True, help="CTF domain for the challenge (scheme optional)")
     parser.add_argument("--challenge-dir", default=".", help="Path to challenge directory (default: current directory)")
-    parser.add_argument("--ctfd-url", help="Base URL of the CTFd instance for automatic updates")
+    parser.add_argument("--ctfd-url", help="Base URL of the CTFd instance for automatic updates (defaults to https://<ctf-domain>)")
     parser.add_argument("--ctfd-token", help="CTFd API token (takes precedence over username/password)")
     parser.add_argument("--ctfd-username", help="CTFd username used to request an API token")
     parser.add_argument("--ctfd-password", help="CTFd password used to request an API token")
@@ -38,10 +53,24 @@ def main():
     )
 
     args = parser.parse_args()
-    subdomain = args.ctf_domain.split('.')[0]
-    ctf_domain = ".".join(args.ctf_domain.split('.')[1:])
+    raw_domain = args.ctf_domain.strip()
+    netloc = _strip_scheme(raw_domain).strip("/")
+    if not netloc:
+        Logger.error("Invalid --ctf-domain value.")
+        sys.exit(1)
+    host_parts = netloc.split(".")
+    if len(host_parts) < 2:
+        Logger.error("Expected --ctf-domain to contain at least a subdomain and domain (e.g., challenge.ctf.example)")
+        sys.exit(1)
+    subdomain = host_parts[0]
+    ctf_domain = ".".join(host_parts[1:])
 
     ctfd_url = args.ctfd_url or os.getenv("CTFD_URL")
+    if ctfd_url:
+        ctfd_url = _normalize_url(ctfd_url.strip())
+    else:
+        ctfd_url = _normalize_url(raw_domain)
+
     ctfd_token = args.ctfd_token or os.getenv("CTFD_TOKEN")
     ctfd_username = args.ctfd_username or os.getenv("CTFD_USERNAME")
     ctfd_password = args.ctfd_password or os.getenv("CTFD_PASSWORD")

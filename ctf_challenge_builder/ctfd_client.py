@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
@@ -84,6 +85,8 @@ class CTFdClient:
     """Small helper for synchronising challenges with CTFd."""
 
     BUILDER_TAG_PREFIX = "builder-sync:"
+    _LOGIN_NONCE_RE = re.compile(r'name="nonce"\s+value="([a-f0-9]+)"', re.IGNORECASE)
+    _JS_NONCE_RE = re.compile(r"'csrfNonce'\s*:\s*\"([a-f0-9]+)\"", re.IGNORECASE)
 
     def __init__(
         self,
@@ -105,6 +108,7 @@ class CTFdClient:
         self._session = requests.Session()
         self._session.verify = verify_ssl
         self._authenticated = False
+        self._csrf_token: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     # Public entry points
@@ -180,22 +184,36 @@ class CTFdClient:
             self._authenticated = True
             return
         if self._username and self._password:
-            response = self._session.post(
-                self._url("/api/v1/tokens"),
-                json={"name": self._username, "password": self._password},
-                timeout=self._timeout,
-            )
-            data = self._extract_json(response)
-            if not data.get("success"):
-                raise CTFdAuthError(f"Authentication failed for user {self._username}")
-            token = data.get("data", {}).get("token")
-            if not token:
-                raise CTFdAuthError("Authentication response did not contain a token")
-            self._token = token
-            self._session.headers["Authorization"] = f"Token {self._token}"
+            self._login_with_password()
             self._authenticated = True
             return
         raise CTFdAuthError("Either an API token or username/password must be provided")
+
+    def _login_with_password(self):
+        login_url = self._url("/login")
+        response = self._session.get(login_url, timeout=self._timeout)
+        response.raise_for_status()
+        nonce = self._extract_login_nonce(response.text)
+        if not nonce:
+            raise CTFdAuthError("Failed to discover CSRF nonce on CTFd login page")
+
+        payload = {"name": self._username, "password": self._password, "nonce": nonce}
+        submit = self._session.post(
+            login_url,
+            data=payload,
+            allow_redirects=False,
+            timeout=self._timeout,
+        )
+        if submit.status_code not in (200, 302, 303):
+            raise CTFdAuthError(f"Login failed with status {submit.status_code}")
+
+        if submit.is_redirect:
+            location = submit.headers.get("Location", "/")
+            self._session.get(self._url(location), timeout=self._timeout)
+
+        csrf_token = self._extract_session_nonce() or nonce
+        self._csrf_token = csrf_token
+        self._session.headers["CSRF-Token"] = csrf_token
 
     def _create_challenge(
         self,
@@ -260,10 +278,7 @@ class CTFdClient:
 
         for value, tag_id in remote_tags.items():
             if value not in desired_values:
-                self._session.delete(
-                    self._url(f"/api/v1/tags/{tag_id}"),
-                    timeout=self._timeout,
-                )
+                self._delete(self._url(f"/api/v1/tags/{tag_id}"))
 
         for value in desired_values:
             if value not in remote_tags:
@@ -284,10 +299,7 @@ class CTFdClient:
         data = self._extract_json(response)
         existing = data.get("data", [])
         for flag in existing:
-            self._session.delete(
-                self._url(f"/api/v1/flags/{flag['id']}"),
-                timeout=self._timeout,
-            )
+            self._delete(self._url(f"/api/v1/flags/{flag['id']}"))
 
         for flag in flags:
             payload = {
@@ -313,10 +325,7 @@ class CTFdClient:
         data = self._extract_json(response)
         existing = data.get("data", [])
         for hint in existing:
-            self._session.delete(
-                self._url(f"/api/v1/hints/{hint['id']}"),
-                timeout=self._timeout,
-            )
+            self._delete(self._url(f"/api/v1/hints/{hint['id']}"))
 
         for hint in hints:
             payload = {
@@ -340,16 +349,17 @@ class CTFdClient:
         data = self._extract_json(response)
         existing = data.get("data", [])
         for file_info in existing:
-            self._session.delete(
-                self._url(f"/api/v1/files/{file_info['id']}"),
-                timeout=self._timeout,
-            )
+            self._delete(self._url(f"/api/v1/files/{file_info['id']}"))
 
         for spec in attachments:
             with spec.path.open("rb") as handle:
                 files = {"file": (spec.name, handle)}
+                data = None
+                if self._csrf_token and "Authorization" not in self._session.headers:
+                    data = {"nonce": self._csrf_token}
                 response = self._session.post(
                     self._url(f"/api/v1/challenges/{challenge_id}/files"),
+                    data=data,
                     files=files,
                     timeout=self._timeout,
                 )
@@ -445,3 +455,31 @@ class CTFdClient:
                 f"CTFd response was not valid JSON: {response.text}"
             ) from exc
 
+    @classmethod
+    def _extract_login_nonce(cls, html: str) -> Optional[str]:
+        match = cls._LOGIN_NONCE_RE.search(html)
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_session_nonce(self) -> Optional[str]:
+        response = self._session.get(self._url("/"), timeout=self._timeout)
+        if response.ok:
+            match = self._JS_NONCE_RE.search(response.text)
+            if match:
+                return match.group(1)
+            hidden = self._LOGIN_NONCE_RE.search(response.text)
+            if hidden:
+                return hidden.group(1)
+        return None
+
+    def _delete(self, url: str):
+        if "Authorization" in self._session.headers:
+            self._session.delete(url, timeout=self._timeout)
+        else:
+            self._session.delete(
+                url,
+                timeout=self._timeout,
+                headers={"Content-Type": "application/json"},
+                json={},
+            )

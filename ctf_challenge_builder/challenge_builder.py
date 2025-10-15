@@ -47,7 +47,7 @@ class ChallengeBuilder:
         self.build_dir = self.challenge_dir / ".build"
         self.dist_dir = self.challenge_dir / "dist"
         self.oci_digest = None  # To store the digest from oras push
-        self.ctfd_url = ctfd_url
+        self.ctfd_url = ctfd_url.rstrip("/") if ctfd_url else None
         self.ctfd_token = ctfd_token
         self.ctfd_username = ctfd_username
         self.ctfd_password = ctfd_password
