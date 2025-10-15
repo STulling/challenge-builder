@@ -40,8 +40,8 @@ type DockerCompose struct {
 type Service struct {
 	Image       string
 	Ports       []string
-	Environment map[string]string
-	DependsOn   []string `yaml:"depends_on"`
+	Environment map[string]string `yaml:"environment"`
+	DependsOn   []string          `yaml:"depends_on"`
 }
 
 func parsePort(p string) int {
@@ -91,6 +91,28 @@ func main() {
 		exposeType = k8s.ExposeIngressTCP
 	}
 	sdk.Run(func(req *sdk.Request, resp *sdk.Response, opts ...pulumi.ResourceOption) error {
+		envOverrides := map[string]string{}
+		for key, value := range req.Config.Additional {
+			if strings.HasPrefix(key, "env.") {
+				envOverrides[strings.TrimPrefix(key, "env.")] = value
+			}
+		}
+		if len(envOverrides) > 0 {
+			for name, svc := range dcfg.Services {
+				if svc.Environment == nil {
+					svc.Environment = map[string]string{}
+				}
+				for envKey, envValue := range envOverrides {
+					svc.Environment[envKey] = envValue
+				}
+				dcfg.Services[name] = svc
+			}
+			updated, err := yaml.Marshal(dcfg)
+			if err != nil {
+				return err
+			}
+			dc = string(updated)
+		}
 		kmp, err := k8s.NewKompose(req.Ctx, cfg.Name, &k8s.KomposeArgs{
 			Identity: pulumi.String(req.Config.Identity),
 			Hostname: pulumi.String(cfg.Ctfd.Slug + "." + Subdomain + "." + CtfDomain),
