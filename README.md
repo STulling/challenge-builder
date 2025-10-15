@@ -66,9 +66,10 @@ ctfd:
     timeout: 900
     additional:
       cpu: 2
+      env.FLAG: "FLAG_PLACEHOLDER"
 ```
 
-The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. The slug defaults to `bundle.slug`, then `ctfd.slug`, and finally the challenge name. That archive is uploaded automatically (the visible filename in CTFd can be overridden with `bundle.name`).
+The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. The slug defaults to `bundle.slug`, then `ctfd.slug`, and finally the challenge name. That archive is uploaded automatically (the visible filename in CTFd can be overridden with `bundle.name`). Keys inside `dynamic_iac.additional` starting with `env.` are forwarded as container environment variables at launch time; set the real flag value from the CTFd admin panel after the first sync so it never lands in the offline bundle.
 
 Example for a `dynamic` challenge that exposes a simple file bundle and static flag:
 

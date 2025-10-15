@@ -3,46 +3,68 @@
 Logger module for Challenge Builder
 """
 
+import sys
+from typing import Optional
+
 import colorama
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 
 # Initialize colorama
 colorama.init(autoreset=True)
+
+_LEVEL_STYLES = {
+    "INFO": Fore.CYAN,
+    "SUCCESS": Fore.GREEN,
+    "FINAL": Fore.GREEN + Style.BRIGHT,
+    "WARNING": Fore.YELLOW,
+    "ERROR": Fore.RED,
+    "STEP": Fore.MAGENTA,
+    "BUILD": Fore.MAGENTA,
+    "PUSH": Fore.BLUE,
+    "PULL": Fore.BLUE,
+}
+
+
+def _emit(level: str, message: str, stream: Optional[int] = None):
+    colour = _LEVEL_STYLES.get(level, "")
+    prefix = f"[{level}]"
+    output = f"{colour}{prefix} {message}{Style.RESET_ALL}"
+    print(output, file=sys.stderr if level in {"WARNING", "ERROR"} else sys.stdout)
 
 
 class Logger:
     @staticmethod
     def info(message: str):
-        print(f"{Fore.LIGHTBLUE_EX}ℹ️  {message}{Style.RESET_ALL}")
+        _emit("INFO", message)
 
     @staticmethod
     def success(message: str):
-        print(f"{Fore.GREEN}✅ {message}{Style.RESET_ALL}")
+        _emit("SUCCESS", message)
 
     @staticmethod
     def final(message: str):
-        print(f"{Back.GREEN}{Fore.BLACK}🎉 {message} {Style.RESET_ALL}")
+        _emit("FINAL", message)
 
     @staticmethod
     def warning(message: str):
-        print(f"{Fore.YELLOW}⚠️  {message}{Style.RESET_ALL}")
+        _emit("WARNING", message)
 
     @staticmethod
     def error(message: str):
-        print(f"{Fore.RED}❌ {message}{Style.RESET_ALL}")
+        _emit("ERROR", message)
 
     @staticmethod
     def step(message: str):
-        print(f"{Fore.CYAN}🔧 {message}{Style.RESET_ALL}")
+        _emit("STEP", message)
 
     @staticmethod
     def build(message: str):
-        print(f"{Fore.MAGENTA}🏗️  {message}{Style.RESET_ALL}")
+        _emit("BUILD", message)
 
     @staticmethod
     def push(message: str):
-        print(f"{Fore.LIGHTBLUE_EX}📤 {message}{Style.RESET_ALL}")
+        _emit("PUSH", message)
 
     @staticmethod
     def pull(message: str):
-        print(f"{Fore.LIGHTBLUE_EX}📥 {message}{Style.RESET_ALL}")
+        _emit("PULL", message)

@@ -116,30 +116,45 @@ class ChallengeBuilder:
         
         print()
 
-    def run_command(self, cmd: List[str], cwd: Optional[Path] = None, input_text: Optional[str] = None) -> subprocess.CompletedProcess:
-        """Run a shell command and return the result"""
+    def run_command(
+        self,
+        cmd: List[str],
+        cwd: Optional[Path] = None,
+        input_text: Optional[str] = None,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess:
+        """Run a shell command and return the result."""
         Logger.step(f"Running: {' '.join(cmd)}")
         if cwd:
-            Logger.info(f"  in directory: {cwd}")
-        # If this is a docker command and sudo is required, prepend sudo
-        if self.use_sudo and cmd and cmd[0] == 'docker':
-            cmd = ['sudo'] + cmd
+            Logger.info(f"working directory: {cwd}")
+        if self.use_sudo and cmd and cmd[0] == "docker":
+            cmd = ["sudo"] + cmd
 
         try:
-            if input_text is not None:
-                result = subprocess.run(cmd, cwd=cwd, input=input_text, text=True, capture_output=True, check=True)
+            if capture_output:
+                result = subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    input=input_text,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
             else:
-                result = subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
-            if result.stdout:
-                Logger.info(f"Output: {result.stdout.strip()}")
+                result = subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    input=input_text,
+                    text=True if input_text is not None else False,
+                    check=True,
+                )
             return result
-        except subprocess.CalledProcessError as e:
-            Logger.error(f"Command failed: {' '.join(cmd)}")
-            Logger.error(f"Return code: {e.returncode}")
-            if e.stdout:
-                Logger.info(f"Stdout: {e.stdout}")
-            if e.stderr:
-                Logger.warning(f"Stderr: {e.stderr}")
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - external command
+            Logger.error(f"Command failed ({exc.returncode}): {' '.join(cmd)}")
+            if exc.stdout:
+                Logger.error(exc.stdout.strip())
+            if exc.stderr:
+                Logger.error(exc.stderr.strip())
             raise
 
     def read_docker_compose(self) -> Dict[str, Any]:
@@ -379,7 +394,7 @@ class ChallengeBuilder:
                     'Pulumi.yaml:application/vnd.ctfer-io.file']
         
         try:
-            result = self.run_command(push_cmd, cwd=self.build_dir)
+            result = self.run_command(push_cmd, cwd=self.build_dir, capture_output=True)
             # Parse the digest from the output
             output_lines = result.stdout.split('\n')
             for line in output_lines:
