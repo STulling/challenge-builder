@@ -25,7 +25,7 @@ var Subdomain string
 
 type ChallengeConfig struct {
 	Name   string
-	IsHTTP bool
+	IsHTTP bool `yaml:"is_http"`
 	Ctfd   CTFDConfig
 }
 
