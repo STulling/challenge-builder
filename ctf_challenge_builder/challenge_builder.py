@@ -677,6 +677,14 @@ class ChallengeBuilder:
             package_name = challenge_data.get("name") if isinstance(challenge_data, dict) else None
             if not package_name:
                 package_name = self.subdomain or "challenge"
+            scenario_slug = self._sanitize_slug(
+                (
+                    (challenge_data.get("ctfd") or {}).get("slug")
+                    if isinstance(challenge_data.get("ctfd"), dict)
+                    else None
+                )
+                or package_name
+            )
 
             if not self.has_compose:
                 Logger.info("No docker-compose.yml detected; skipping OCI build steps.")
@@ -702,6 +710,14 @@ class ChallengeBuilder:
                 package_name = challenge_data["name"]
             else:
                 package_name = services[0]
+            scenario_slug = self._sanitize_slug(
+                (
+                    (challenge_data.get("ctfd") or {}).get("slug")
+                    if isinstance(challenge_data.get("ctfd"), dict)
+                    else None
+                )
+                or package_name
+            )
 
             # Step 4-8: Create .build directory and copy files
             self.create_build_directory()
@@ -711,11 +727,11 @@ class ChallengeBuilder:
             self.build_go_program()
 
             # Step 11: Push to OCI registry
-            self.push_to_oci_registry(package_name)
+            self.push_to_oci_registry(scenario_slug)
 
             complete_package = None
             if self.oci_digest:
-                oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
+                oci_tag = f"{self.registry}/{self.subdomain}/{scenario_slug}-scenario:latest"
                 complete_package = f"{oci_tag}@{self.oci_digest}"
             else:
                 Logger.warning("Could not capture OCI digest from push output")
