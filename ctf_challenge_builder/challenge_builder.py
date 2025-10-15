@@ -656,36 +656,51 @@ class ChallengeBuilder:
             Logger.info(f"Registry: {self.registry}")
             Logger.info(f"Template: {self.template_folder}")
             print()
-            
-            # Perform sanity checks
+
+            challenge_data: Dict[str, Any] = {}
+            if self.has_challenge:
+                try:
+                    challenge_data = self.read_challenge_yaml()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    Logger.warning(f"Failed to parse challenge.yml: {exc}")
+
+            # Determine default package name from challenge data or fallback to subdomain
+            package_name = challenge_data.get("name") if isinstance(challenge_data, dict) else None
+            if not package_name:
+                package_name = self.subdomain or "challenge"
+
+            if not self.has_compose:
+                Logger.info("No docker-compose.yml detected; skipping OCI build steps.")
+                self.sync_ctfd(challenge_data, package_name, None)
+                Logger.success("Challenge synchronisation completed successfully!")
+                return
+
+            # Perform sanity checks for registry-backed challenges
             self.perform_sanity_checks()
-            
+
             # Step 1-3: Read docker-compose, build images, push images, substitute
             compose_data = self.read_docker_compose()
-            # Ensure we're logged in to the registry before building/pushing images
             self.ensure_logged_in()
             image_substitutions = self.build_and_push_images(compose_data)
             updated_compose_data = self.substitute_docker_compose_images(compose_data, image_substitutions)
-            
-            # Determine package name for OCI registry
-            services = list(compose_data.get('services', {}).keys())
+
+            services = list(compose_data.get("services", {}).keys())
             if not services:
                 raise ValueError("No services found in docker-compose.yml")
-            # Use challenge name from challenge.yml if available, otherwise first service name
-            challenge_data = {}
-            try:
-                challenge_data = self.read_challenge_yaml()
-                package_name = challenge_data.get('name', services[0])
-            except Exception:
+
+            # Choose package name based on challenge.yml or first service
+            if isinstance(challenge_data, dict) and challenge_data.get("name"):
+                package_name = challenge_data["name"]
+            else:
                 package_name = services[0]
-            
+
             # Step 4-8: Create .build directory and copy files
             self.create_build_directory()
             self.copy_files_to_build(updated_compose_data)
-            
+
             # Step 9-10: Build Go program
             self.build_go_program()
-            
+
             # Step 11: Push to OCI registry
             self.push_to_oci_registry(package_name)
 
@@ -697,12 +712,12 @@ class ChallengeBuilder:
                 Logger.warning("Could not capture OCI digest from push output")
 
             self.sync_ctfd(challenge_data, package_name, complete_package)
-            
+
             Logger.success("Challenge build completed successfully!")
 
             if complete_package:
                 Logger.final(f"Complete registry package: {complete_package}")
-            
+
         except Exception as e:
             Logger.error(f"Build failed: {e}")
             raise

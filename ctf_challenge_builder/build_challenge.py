@@ -62,9 +62,9 @@ def main():
         ctfd_verify_ssl=ctfd_verify_ssl,
     )
 
-    # Both docker-compose.yml and challenge.yml must be present to build a challenge
-    if not (builder.has_compose and builder.has_challenge):
-        Logger.warning("docker-compose.yml and/or challenge.yml not found in the current directory. Nothing to do.")
+    # challenge.yml is mandatory; docker-compose.yml is optional (only needed for dynamic_iac scenarios)
+    if not builder.has_challenge:
+        Logger.warning("challenge.yml not found in the current directory. Nothing to do.")
         sys.exit(0)
 
     try:

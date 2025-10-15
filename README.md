@@ -18,6 +18,8 @@ Run from within a challenge directory that contains `docker-compose.yml` and `ch
 build-challenge --ctf-domain <ctf-domain>
 ```
 
+For classic (non-IaC) dynamic challenges you can omit `docker-compose.yml`; the builder will skip image/OCI packaging and only perform the CTFd synchronisation.
+
 ### Optional: Sync with CTFd
 
 Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built:
