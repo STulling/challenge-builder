@@ -541,6 +541,15 @@ class ChallengeBuilder:
                 if value is not None:
                     payload[key] = value
 
+        if payload["type"] in ("dynamic", "dynamic_iac"):
+            starting_value = payload.get("value")
+            if starting_value is None:
+                starting_value = 500
+                payload["value"] = starting_value
+            payload.setdefault("initial", starting_value)
+            payload.setdefault("minimum", 100)
+            payload.setdefault("decay", 50)
+
         return {key: value for key, value in payload.items() if value is not None}
 
     def _log_ctfd_result(self, result: ChallengeSyncResult):
