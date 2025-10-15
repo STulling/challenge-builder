@@ -24,28 +24,13 @@ var CtfDomain string
 var Subdomain string
 
 type ChallengeConfig struct {
-	Name          string
-	Description   string
-	Category      string
-	Type          string
-	IsHTTP        bool
-	DestroyOnFlag bool
-	Scenario      string
-	Shared        bool
-	Timeout       int
-	ManaCost      int
-	Max           int
-	Min           int
-	Subdomain     string
-	EnvFlag       bool
-	ServeFolder   string
-	Tags          []string
-	Topics        []string
-	Attribution   string
-	Initial       int
-	Decay         int
-	Minimum       int
-	Function      string
+	Name   string
+	IsHTTP bool
+	Ctfd   CTFDConfig
+}
+
+type CTFDConfig struct {
+	Slug string
 }
 
 type DockerCompose struct {
@@ -108,7 +93,7 @@ func main() {
 	sdk.Run(func(req *sdk.Request, resp *sdk.Response, opts ...pulumi.ResourceOption) error {
 		kmp, err := k8s.NewKompose(req.Ctx, cfg.Name, &k8s.KomposeArgs{
 			Identity: pulumi.String(req.Config.Identity),
-			Hostname: pulumi.String(cfg.Name + "." + Subdomain + "." + CtfDomain),
+			Hostname: pulumi.String(cfg.Ctfd.Slug + "." + Subdomain + "." + CtfDomain),
 			YAML:     pulumi.String(dc),
 			Ports: k8s.PortBindingMapArray{
 				firstService: {
