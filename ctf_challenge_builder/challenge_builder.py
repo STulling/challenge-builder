@@ -250,20 +250,37 @@ class ChallengeBuilder:
     def is_logged_in_to_registry(self) -> bool:
         """Check whether docker is logged in to the target registry.
 
-        Strategy: run `docker info --format '{{json .}}'` and search for the registry in the AuthConfig (best-effort),
-        but since docker doesn't expose a simple API for this, we'll fall back to attempting a `docker pull` of a non-existent
-        image manifest using the registry to provoke an unauthorized error. To avoid slow network calls, first try `docker info`.
+        Strategy: Check the docker config file for the registry credentials.
+        If using sudo, check the root user's docker config.
         """
         # Build docker command with sudo if needed
         docker_cmd = ['sudo', 'docker'] if self.use_sudo else ['docker']
         
-        # First quick check: docker info
+        # First check: Look at docker config for stored credentials
         try:
-            cp = subprocess.run(docker_cmd + ['info'], capture_output=True, text=True)
-            out = (cp.stdout or '') + (cp.stderr or '')
-            # If Authentication info or Username appears, assume logged in somewhere; we specifically check for our registry
-            if self.registry in out:
-                return True
+            config_cmd = docker_cmd + ['config', 'ls']
+            cp = subprocess.run(config_cmd, capture_output=True, text=True)
+            
+            # Also check the config.json file directly for more reliable results
+            if self.use_sudo:
+                # For sudo, check root's docker config
+                config_path = '/root/.docker/config.json'
+                cat_cmd = ['sudo', 'cat', config_path]
+            else:
+                # For regular user
+                config_path = os.path.expanduser('~/.docker/config.json')
+                cat_cmd = ['cat', config_path]
+            
+            try:
+                cp = subprocess.run(cat_cmd, capture_output=True, text=True)
+                if cp.returncode == 0:
+                    config_content = cp.stdout
+                    # Check if our registry is in the auths section
+                    if self.registry in config_content:
+                        # Found credentials for our registry
+                        return True
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -271,7 +288,7 @@ class ChallengeBuilder:
         test_image = f"{self.registry}/__ctf_builder_login_test__:nope"
         try:
             # docker pull will return non-zero if not authorized; capture output
-            cp = subprocess.run(docker_cmd + ['pull', test_image], capture_output=True, text=True)
+            cp = subprocess.run(docker_cmd + ['pull', test_image], capture_output=True, text=True, timeout=10)
             combined = (cp.stdout or '') + (cp.stderr or '')
             # If the output contains 'unauthorized' or 'authentication required' consider not logged in
             lower = combined.lower()
@@ -280,6 +297,9 @@ class ChallengeBuilder:
             # If it says not found or manifest unknown, it's likely we are authenticated but image doesn't exist
             if 'not found' in lower or 'manifest unknown' in lower:
                 return True
+        except subprocess.TimeoutExpired:
+            # If it times out, we can't determine - be safe and return False
+            return False
         except Exception:
             pass
 
