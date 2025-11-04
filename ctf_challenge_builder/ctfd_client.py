@@ -91,7 +91,6 @@ class CTFdClient:
     def __init__(
         self,
         base_url: str,
-        token: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         verify_ssl: bool = True,
@@ -101,7 +100,6 @@ class CTFdClient:
             raise ValueError("base_url is required to talk to CTFd")
 
         self.base_url = base_url.rstrip("/")
-        self._token = token
         self._username = username
         self._password = password
         self._timeout = timeout
@@ -179,15 +177,11 @@ class CTFdClient:
     def _authenticate(self):
         if self._authenticated:
             return
-        if self._token:
-            self._session.headers["Authorization"] = f"Token {self._token}"
-            self._authenticated = True
-            return
         if self._username and self._password:
             self._login_with_password()
             self._authenticated = True
             return
-        raise CTFdAuthError("Either an API token or username/password must be provided")
+        raise CTFdAuthError("Username and password must be provided for CTFd authentication")
 
     class _NonceHTMLParser(HTMLParser):
         def __init__(self):

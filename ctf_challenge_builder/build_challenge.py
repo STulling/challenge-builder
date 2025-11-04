@@ -3,10 +3,11 @@
 Challenge Builder Script
 
 This script builds challenge images and creates OCI deployment packages.
-Usage: build-challenge --ctfd-url <ctfd-url>
+Usage: build-challenge --ctfd-domain <ctfd-domain>
 """
 
 import argparse
+import getpass
 import os
 import sys
 
@@ -99,11 +100,12 @@ def main():
     check_for_updates()
     
     parser = argparse.ArgumentParser(description="Build challenge images and create OCI deployment packages")
-    parser.add_argument("--ctfd-url", required=True, help="CTFd URL (e.g., https://challenge.ctf.example or challenge.ctf.example)")
+    parser.add_argument("--ctfd-domain", required=True, help="CTFd domain (e.g., https://challenge.ctf.example or challenge.ctf.example)")
     parser.add_argument("--challenge-dir", default=".", help="Path to challenge directory (default: current directory)")
-    parser.add_argument("--ctfd-token", help="CTFd API token (takes precedence over username/password)")
-    parser.add_argument("--ctfd-username", help="CTFd username used to request an API token")
-    parser.add_argument("--ctfd-password", help="CTFd password used to request an API token")
+    parser.add_argument("--ctfd-username", help="CTFd username (will be prompted if not provided)")
+    parser.add_argument("--ctfd-password", help="CTFd password (will be prompted if not provided)")
+    parser.add_argument("--oci-username", help="OCI registry username (will be prompted if not provided and needed)")
+    parser.add_argument("--oci-password", help="OCI registry password (will be prompted if not provided and needed)")
     parser.add_argument(
         "--ctfd-no-verify",
         action="store_true",
@@ -113,9 +115,9 @@ def main():
     args = parser.parse_args()
     
     # Parse CTFd URL to extract subdomain and domain
-    ctfd_url = args.ctfd_url or os.getenv("CTFD_URL")
+    ctfd_url = args.ctfd_domain or os.getenv("CTFD_DOMAIN")
     if not ctfd_url:
-        Logger.error("CTFd URL is required. Provide it via --ctfd-url or CTFD_URL environment variable.")
+        Logger.error("CTFd domain is required. Provide it via --ctfd-domain or CTFD_DOMAIN environment variable.")
         sys.exit(1)
     
     try:
@@ -124,9 +126,19 @@ def main():
         Logger.error(str(e))
         sys.exit(1)
 
-    ctfd_token = args.ctfd_token or os.getenv("CTFD_TOKEN")
+    # Prompt for CTFd credentials if not provided
     ctfd_username = args.ctfd_username or os.getenv("CTFD_USERNAME")
     ctfd_password = args.ctfd_password or os.getenv("CTFD_PASSWORD")
+    
+    if not ctfd_username:
+        ctfd_username = input(f"🔐 Enter CTFd username for {full_ctfd_url}: ").strip()
+    
+    if not ctfd_password:
+        ctfd_password = getpass.getpass(f"🔐 Enter CTFd password for {full_ctfd_url}: ")
+
+    # OCI credentials (will be prompted later if needed for docker login)
+    oci_username = args.oci_username or os.getenv("OCI_USERNAME")
+    oci_password = args.oci_password or os.getenv("OCI_PASSWORD")
 
     ctfd_verify_ssl = not args.ctfd_no_verify
     env_verify = os.getenv("CTFD_VERIFY_SSL")
@@ -138,10 +150,11 @@ def main():
         subdomain=subdomain,
         ctf_domain=ctf_domain,
         ctfd_url=full_ctfd_url,
-        ctfd_token=ctfd_token,
         ctfd_username=ctfd_username,
         ctfd_password=ctfd_password,
         ctfd_verify_ssl=ctfd_verify_ssl,
+        oci_username=oci_username,
+        oci_password=oci_password,
     )
 
     # challenge.yml is mandatory; docker-compose.yml is optional (only needed for dynamic_iac scenarios)

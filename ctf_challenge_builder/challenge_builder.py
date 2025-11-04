@@ -35,10 +35,11 @@ class ChallengeBuilder:
         subdomain: str,
         ctf_domain: str,
         ctfd_url: Optional[str] = None,
-        ctfd_token: Optional[str] = None,
         ctfd_username: Optional[str] = None,
         ctfd_password: Optional[str] = None,
         ctfd_verify_ssl: bool = True,
+        oci_username: Optional[str] = None,
+        oci_password: Optional[str] = None,
     ):
         self.challenge_dir = Path(challenge_dir).resolve()
         self.subdomain = subdomain
@@ -48,10 +49,11 @@ class ChallengeBuilder:
         self.dist_dir = self.challenge_dir / "dist"
         self.oci_digest = None  # To store the digest from oras push
         self.ctfd_url = ctfd_url.rstrip("/") if ctfd_url else None
-        self.ctfd_token = ctfd_token
         self.ctfd_username = ctfd_username
         self.ctfd_password = ctfd_password
         self.ctfd_verify_ssl = ctfd_verify_ssl
+        self.oci_username = oci_username
+        self.oci_password = oci_password
         # Detect if we should prefix docker commands with sudo (non-Windows, non-root)
         self.use_sudo = False
         try:
@@ -128,6 +130,8 @@ class ChallengeBuilder:
         if cwd:
             Logger.info(f"working directory: {cwd}")
         if self.use_sudo and cmd and cmd[0] == "docker":
+            Logger.info("🔒 Docker requires elevated privileges. Running with sudo...")
+            Logger.info("You may be prompted for your sudo password.")
             cmd = ["sudo"] + cmd
 
         try:
@@ -288,13 +292,20 @@ class ChallengeBuilder:
         except Exception as e:
             Logger.warning(f"Warning while checking login status: {e}")
 
-        # Prompt the user for credentials
+        # Prompt the user for credentials if not already provided
         Logger.warning(f"You are not logged into {self.registry}.")
         print()
         
         import getpass
-        username = input(f"🔐 Enter username for {self.registry}: ").strip()
-        password = getpass.getpass(f"🔐 Enter password for {self.registry}: ")
+        
+        username = self.oci_username
+        password = self.oci_password
+        
+        if not username:
+            username = input(f"🔐 Enter username for {self.registry}: ").strip()
+        
+        if not password:
+            password = getpass.getpass(f"🔐 Enter password for {self.registry}: ")
         
         # Use docker login with credentials
         login_cmd = ['docker', 'login', '--username', username, '--password-stdin', self.registry]
@@ -645,7 +656,6 @@ class ChallengeBuilder:
 
         client = CTFdClient(
             base_url=self.ctfd_url,
-            token=self.ctfd_token,
             username=self.ctfd_username,
             password=self.ctfd_password,
             verify_ssl=self.ctfd_verify_ssl,
