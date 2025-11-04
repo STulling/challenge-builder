@@ -3,7 +3,7 @@
 Challenge Builder Script
 
 This script builds challenge images and creates OCI deployment packages.
-Usage: build-challenge --ctf-domain <ctf-domain>
+Usage: build-challenge --ctfd-url <ctfd-url>
 """
 
 import argparse
@@ -12,8 +12,40 @@ import sys
 
 from urllib.parse import urlsplit
 
+import requests
+
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
+
+__version__ = "0.2.12"
+
+
+def check_for_updates():
+    """Check if a new version of the tool is available on GitHub"""
+    try:
+        response = requests.get(
+            "https://api.github.com/repos/STulling/challenge-builder/contents/challenge-builder/pyproject.toml",
+            headers={"Accept": "application/vnd.github.raw"},
+            timeout=5
+        )
+        if response.status_code == 200:
+            # Parse version from pyproject.toml content
+            for line in response.text.split('\n'):
+                if line.strip().startswith('version = '):
+                    # Extract version string (format: version = "0.2.12")
+                    latest_version = line.split('=')[1].strip().strip('"\'')
+                    if latest_version != __version__:
+                        Logger.warning(f"A new version ({latest_version}) is available. You are using version {__version__}.")
+                        Logger.info(f"Update with: pipx upgrade ctf-challenge-builder")
+                        print()
+                        exit(0)
+                    else:
+                        Logger.info(f"You are using the latest version ({__version__})")
+                        print()
+                    break
+    except Exception:
+        # Silently fail if we can't check for updates
+        pass
 
 
 def _env_or_default(value: str, default: bool) -> bool:
@@ -25,24 +57,50 @@ def _env_or_default(value: str, default: bool) -> bool:
     return default
 
 
-def _strip_scheme(domain: str) -> str:
-    parsed = urlsplit(domain if domain.startswith(("http://", "https://")) else f"https://{domain}")
-    return parsed.netloc
+def _parse_ctfd_url(ctfd_url: str) -> tuple:
+    """
+    Parse CTFd URL to extract subdomain and base domain.
+    
+    Args:
+        ctfd_url: Full CTFd URL (e.g., https://challenge.ctf.example or challenge.ctf.example)
+    
+    Returns:
+        tuple: (subdomain, ctf_domain, full_challenge_url)
+        Example: ("challenge", "ctf.example", "https://challenge.ctf.example")
+    """
+    # Add scheme if not present
+    if not ctfd_url.startswith(("http://", "https://")):
+        ctfd_url = f"https://{ctfd_url}"
+    
+    parsed = urlsplit(ctfd_url)
+    netloc = parsed.netloc.strip("/")
+    
+    if not netloc:
+        raise ValueError("Invalid CTFd URL: no domain found")
+    
+    host_parts = netloc.split(".")
+    if len(host_parts) < 2:
+        raise ValueError("Expected CTFd URL to contain at least a subdomain and domain (e.g., challenge.ctf.example)")
+    
+    subdomain = host_parts[0]
+    ctf_domain = ".".join(host_parts[1:])
+    
+    # Reconstruct full URL with proper scheme
+    scheme = parsed.scheme or "https"
+    full_url = f"{scheme}://{netloc}"
+    
+    return subdomain, ctf_domain, full_url
 
 
-def _normalize_url(value: str) -> str:
-    if not value:
-        return value
-    if not value.startswith(("http://", "https://")):
-        value = f"https://{value}"
-    return value.rstrip("/")
 
 
 def main():
+    # Check for updates first
+    check_for_updates()
+    
     parser = argparse.ArgumentParser(description="Build challenge images and create OCI deployment packages")
-    parser.add_argument("--ctf-domain", required=True, help="CTF domain for the challenge (scheme optional)")
+    parser.add_argument("--ctfd-url", required=True, help="CTFd URL (e.g., https://challenge.ctf.example or challenge.ctf.example)")
     parser.add_argument("--challenge-dir", default=".", help="Path to challenge directory (default: current directory)")
-    parser.add_argument("--ctfd-url", help="Base URL of the CTFd instance for automatic updates (defaults to https://<ctf-domain>)")
     parser.add_argument("--ctfd-token", help="CTFd API token (takes precedence over username/password)")
     parser.add_argument("--ctfd-username", help="CTFd username used to request an API token")
     parser.add_argument("--ctfd-password", help="CTFd password used to request an API token")
@@ -53,23 +111,18 @@ def main():
     )
 
     args = parser.parse_args()
-    raw_domain = args.ctf_domain.strip()
-    netloc = _strip_scheme(raw_domain).strip("/")
-    if not netloc:
-        Logger.error("Invalid --ctf-domain value.")
-        sys.exit(1)
-    host_parts = netloc.split(".")
-    if len(host_parts) < 2:
-        Logger.error("Expected --ctf-domain to contain at least a subdomain and domain (e.g., challenge.ctf.example)")
-        sys.exit(1)
-    subdomain = host_parts[0]
-    ctf_domain = ".".join(host_parts[1:])
-
+    
+    # Parse CTFd URL to extract subdomain and domain
     ctfd_url = args.ctfd_url or os.getenv("CTFD_URL")
-    if ctfd_url:
-        ctfd_url = _normalize_url(ctfd_url.strip())
-    else:
-        ctfd_url = _normalize_url(raw_domain)
+    if not ctfd_url:
+        Logger.error("CTFd URL is required. Provide it via --ctfd-url or CTFD_URL environment variable.")
+        sys.exit(1)
+    
+    try:
+        subdomain, ctf_domain, full_ctfd_url = _parse_ctfd_url(ctfd_url.strip())
+    except ValueError as e:
+        Logger.error(str(e))
+        sys.exit(1)
 
     ctfd_token = args.ctfd_token or os.getenv("CTFD_TOKEN")
     ctfd_username = args.ctfd_username or os.getenv("CTFD_USERNAME")
@@ -84,7 +137,7 @@ def main():
         challenge_dir=args.challenge_dir,
         subdomain=subdomain,
         ctf_domain=ctf_domain,
-        ctfd_url=ctfd_url,
+        ctfd_url=full_ctfd_url,
         ctfd_token=ctfd_token,
         ctfd_username=ctfd_username,
         ctfd_password=ctfd_password,

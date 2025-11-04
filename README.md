@@ -7,7 +7,7 @@ A tool to build challenge images and create OCI deployment packages for CTF (Cap
 Install via pipx:
 
 ```bash
-pipx install ctf-challenge-builder
+pipx install git+https://github.com/STulling/challenge-builder.git
 ```
 
 ## Usage
@@ -15,21 +15,30 @@ pipx install ctf-challenge-builder
 Run from within a challenge directory that contains `docker-compose.yml` and `challenge.yml`:
 
 ```bash
-build-challenge --ctf-domain <ctf-domain>
+build-challenge --ctfd-url <ctfd-url>
 ```
 
 For classic (non-IaC) dynamic challenges you can omit `docker-compose.yml`; the builder will skip image/OCI packaging and only perform the CTFd synchronisation.
 
-`<ctf-domain>` should be the host where the challenge will run (for example, `web.ctf.example`); you may include an `https://` scheme if that is more convenient.
+`<ctfd-url>` should be the full URL where the challenge will run (for example, `https://web.ctf.example` or simply `web.ctf.example`). The tool will automatically extract the subdomain and base domain from this URL.
 
-### Optional: Sync with CTFd
+### Auto-Update Check
 
-Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built. `--ctfd-url` defaults to `https://<ctf-domain>` when omitted:
+When you run the tool, it automatically checks GitHub for newer versions and notifies you if an update is available. To upgrade:
+
+```bash
+pipx upgrade ctf-challenge-builder
+# or reinstall from GitHub
+pipx install --force git+https://github.com/STulling/challenge-builder.git
+```
+
+### Sync with CTFd
+
+Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built:
 
 ```bash
 build-challenge \
-  --ctf-domain mychal.ctf.example \
-  --ctfd-url https://ctfd.example \
+  --ctfd-url https://mychal.ctf.example \
   --ctfd-token <api-token>
 ```
 
@@ -62,14 +71,14 @@ ctfd:
     decay: 50
   dynamic_iac:
     # scenario defaults to the OCI reference produced by the builder
-    mana_cost: 1
+    mana_cost: 3
     timeout: 900
     additional:
       cpu: 2
       env.FLAG: "FLAG_PLACEHOLDER"
 ```
 
-The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. The slug defaults to `bundle.slug`, then `ctfd.slug`, and finally the challenge name. That archive is uploaded automatically (the visible filename in CTFd can be overridden with `bundle.name`). Keys inside `dynamic_iac.additional` starting with `env.` are forwarded as container environment variables at launch time; set the real flag value from the CTFd admin panel after the first sync so it never lands in the offline bundle.
+The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. The slug defaults to `bundle.slug`, then `ctfd.slug`, and finally the challenge name. That archive is uploaded automatically (the visible filename in CTFd can be overridden with `bundle.name`). Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time; set the real flag value from the CTFd admin panel after the first sync so it never lands in the offline bundle.
 
 Example for a `dynamic` challenge that exposes a simple file bundle and static flag:
 
