@@ -92,10 +92,14 @@ class CTFdSync:
         # Dynamic scoring defaults
         if payload["type"] in ("dynamic", "dynamic_iac"):
             starting_value = payload.get("value") or 500
-            payload.setdefault("value", starting_value)
-            payload.setdefault("initial", starting_value)
-            payload.setdefault("minimum", 100)
-            payload.setdefault("decay", 50)
+            if not payload.get("value"):
+                payload["value"] = starting_value
+            if not payload.get("initial"):
+                payload["initial"] = starting_value
+            if not payload.get("minimum"):
+                payload["minimum"] = 100
+            if not payload.get("decay"):
+                payload["decay"] = 15
 
         return {k: v for k, v in payload.items() if v is not None}
 
