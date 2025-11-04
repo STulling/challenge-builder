@@ -16,16 +16,14 @@ import requests
 
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
-
-__version__ = "0.2.12"
+from . import __version__
 
 
 def check_for_updates():
     """Check if a new version of the tool is available on GitHub"""
     try:
         response = requests.get(
-            "https://api.github.com/repos/STulling/challenge-builder/contents/challenge-builder/pyproject.toml",
-            headers={"Accept": "application/vnd.github.raw"},
+            "https://raw.githubusercontent.com/STulling/challenge-builder/refs/heads/main/pyproject.toml",
             timeout=5
         )
         if response.status_code == 200:
