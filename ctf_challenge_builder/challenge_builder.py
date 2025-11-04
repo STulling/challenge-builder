@@ -253,9 +253,12 @@ class ChallengeBuilder:
         but since docker doesn't expose a simple API for this, we'll fall back to attempting a `docker pull` of a non-existent
         image manifest using the registry to provoke an unauthorized error. To avoid slow network calls, first try `docker info`.
         """
+        # Build docker command with sudo if needed
+        docker_cmd = ['sudo', 'docker'] if self.use_sudo else ['docker']
+        
         # First quick check: docker info
         try:
-            cp = subprocess.run(['docker', 'info'], capture_output=True, text=True)
+            cp = subprocess.run(docker_cmd + ['info'], capture_output=True, text=True)
             out = (cp.stdout or '') + (cp.stderr or '')
             # If Authentication info or Username appears, assume logged in somewhere; we specifically check for our registry
             if self.registry in out:
@@ -267,7 +270,7 @@ class ChallengeBuilder:
         test_image = f"{self.registry}/__ctf_builder_login_test__:nope"
         try:
             # docker pull will return non-zero if not authorized; capture output
-            cp = subprocess.run(['docker', 'pull', test_image], capture_output=True, text=True)
+            cp = subprocess.run(docker_cmd + ['pull', test_image], capture_output=True, text=True)
             combined = (cp.stdout or '') + (cp.stderr or '')
             # If the output contains 'unauthorized' or 'authentication required' consider not logged in
             lower = combined.lower()
@@ -285,6 +288,10 @@ class ChallengeBuilder:
     def ensure_logged_in(self):
         """Ensure the user is logged into the configured registry. If not, prompt for docker login."""
         Logger.info(f"Checking Docker login status for registry: {self.registry}")
+        
+        if self.use_sudo:
+            Logger.info("Note: Docker commands will run with sudo, so login credentials need to be available to root user")
+        
         try:
             if self.is_logged_in_to_registry():
                 Logger.success("Docker appears to be logged in to the registry.")
@@ -309,13 +316,19 @@ class ChallengeBuilder:
         
         # Use docker login with credentials
         login_cmd = ['docker', 'login', '--username', username, '--password-stdin', self.registry]
+        
+        if self.use_sudo:
+            Logger.info("🔒 Logging into Docker registry with sudo (credentials will be stored for root user)...")
+            Logger.info("You may be prompted for your sudo password.")
+        
         try:
             # Pass password via stdin
             self.run_command(login_cmd, input_text=password)
             Logger.success("Successfully logged into Docker registry.")
         except subprocess.CalledProcessError as e:
-            Logger.error(f"Docker login failed: {e.stderr.strip()}")
-            raise RuntimeError(f"Docker login failed: {e.stderr.strip()}")
+            error_msg = e.stderr.strip() if e.stderr else str(e)
+            Logger.error(f"Docker login failed: {error_msg}")
+            raise RuntimeError(f"Docker login failed: {error_msg}")
 
     def substitute_docker_compose_images(self, compose_data: Dict[str, Any], image_substitutions: Dict[str, str]) -> Dict[str, Any]:
         """Update the docker-compose data with new image tags"""
