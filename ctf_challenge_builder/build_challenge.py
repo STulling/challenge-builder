@@ -16,7 +16,9 @@ import requests
 
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
-from . import __version__
+
+import importlib.metadata
+__version__ = importlib.metadata.version("ctf-challenge-builder")
 
 
 def check_for_updates():
