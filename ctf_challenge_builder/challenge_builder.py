@@ -60,6 +60,7 @@ class ChallengeBuilder:
             # On Windows, assume no sudo; on Unix check uid
             if os.name != 'nt':
                 self.use_sudo = (os.geteuid() != 0)
+                Logger.info(f"Using sudo for docker commands: {self.use_sudo}")
         except Exception:
             # If os.geteuid isn't available or any error occurs, default to False
             self.use_sudo = False
