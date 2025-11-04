@@ -13,22 +13,22 @@ from colorama import Fore, Style
 colorama.init(autoreset=True)
 
 _LEVEL_STYLES = {
-    "INFO": Fore.CYAN,
+    "INFO": Fore.WHITE,
     "SUCCESS": Fore.GREEN,
-    "FINAL": Fore.GREEN + Style.BRIGHT,
+    "FINAL": Fore.GREEN,
     "WARNING": Fore.YELLOW,
     "ERROR": Fore.RED,
-    "STEP": Fore.MAGENTA,
-    "BUILD": Fore.MAGENTA,
-    "PUSH": Fore.BLUE,
-    "PULL": Fore.BLUE,
+    "STEP": Fore.CYAN,
+    "BUILD": Fore.CYAN,
+    "PUSH": Fore.CYAN,
+    "PULL": Fore.CYAN,
 }
 
 
 def _emit(level: str, message: str, stream: Optional[int] = None):
     colour = _LEVEL_STYLES.get(level, "")
     prefix = f"[{level}]"
-    output = f"{colour}{prefix} {message}{Style.RESET_ALL}"
+    output = f"{colour}{prefix}{Style.RESET_ALL} {message}"
     print(output, file=sys.stderr if level in {"WARNING", "ERROR"} else sys.stdout)
 
 
