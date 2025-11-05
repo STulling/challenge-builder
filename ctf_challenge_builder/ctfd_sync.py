@@ -101,6 +101,10 @@ class CTFdSync:
             if not payload.get("decay"):
                 payload["decay"] = 15
 
+        if payload["type"] == "dynamic_iac":
+            if not payload.get("destroy_on_flag"):
+                payload["destroy_on_flag"] = True
+
         return {k: v for k, v in payload.items() if v is not None}
 
     def _log_result(self, result: ChallengeSyncResult):
