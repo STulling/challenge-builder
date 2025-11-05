@@ -145,5 +145,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 )
 
-replace github.com/ctfer-io/chall-manager/sdk => github.com/stulling/chall-manager/sdk v0.5.6
-replace github.com/ctfer-io/chall-manager/sdk/kubernetes => github.com/stulling/infra/apps/chall-manager/sdk/kubernetes v0.5.6
+replace github.com/ctfer-io/chall-manager/sdk => github.com/stulling/chall-manager/sdk v0.5.7
+replace github.com/ctfer-io/chall-manager/sdk/kubernetes => github.com/stulling/infra/apps/chall-manager/sdk/kubernetes v0.5.7
