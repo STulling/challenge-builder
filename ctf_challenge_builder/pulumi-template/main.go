@@ -72,15 +72,26 @@ func main() {
 	if err := yaml.Unmarshal([]byte(dc), &dcfg); err != nil {
 		panic(err)
 	}
-	var firstService string
-	for name, svc := range dcfg.Services {
-		// if name start with entry-
-		if strings.HasPrefix(name, "entry-") && len(svc.Ports) > 0 {
-			firstService = name
-			break
+	var exposedService string
+	if len(dcfg.Services) > 1 {
+		fmt.Println("Multiple services detected in docker-compose.yaml")
+		for name, svc := range dcfg.Services {
+			// if name start with entry-
+			if strings.HasPrefix(name, "entry-") && len(svc.Ports) > 0 {
+				exposedService = name
+				break
+			}
+		}
+	} else {
+		// only one service, use it
+		for name, svc := range dcfg.Services {
+			if len(svc.Ports) > 0 {
+				exposedService = name
+				break
+			}
 		}
 	}
-	if firstService == "" {
+	if exposedService == "" {
 		panic("no service with exposed ports found")
 	}
 	// Get ExposeType based on cfg.IsHTTP
@@ -118,9 +129,9 @@ func main() {
 			Hostname: pulumi.String(cfg.Ctfd.Slug + "." + Subdomain + "." + CtfDomain),
 			YAML:     pulumi.String(dc),
 			Ports: k8s.PortBindingMapArray{
-				firstService: {
+				exposedService: {
 					k8s.PortBindingArgs{
-						Port:       pulumi.Int(parsePort(dcfg.Services[firstService].Ports[0])),
+						Port:       pulumi.Int(parsePort(dcfg.Services[exposedService].Ports[0])),
 						ExposeType: exposeType,
 					},
 				},
@@ -131,12 +142,12 @@ func main() {
 			return err
 		}
 		var portName string // Something like "80/TCP"
-		portName = fmt.Sprintf("%d/%s", parsePort(dcfg.Services[firstService].Ports[0]), "TCP")
+		portName = fmt.Sprintf("%d/%s", parsePort(dcfg.Services[exposedService].Ports[0]), "TCP")
 		// if the challenge is HTTP, set the ConnectionInfo to the URL of the first service
 		if cfg.IsHTTP {
-			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
+			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(exposedService)))
 		} else {
-			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(firstService)).MapIndex(pulumi.String(portName)))
+			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(exposedService)).MapIndex(pulumi.String(portName)))
 		}
 		return nil
 	})
