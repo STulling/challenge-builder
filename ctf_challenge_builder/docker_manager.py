@@ -181,3 +181,20 @@ class DockerManager:
                 service_config['image'] = new_image
         
         return updated_compose
+    
+    @staticmethod
+    def update_ports(compose_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update docker-compose with new port mappings"""
+        updated_compose = yaml.safe_load(yaml.dump(compose_data))
+        
+        for service in updated_compose.get('services', {}).values():
+            ports = service.get('ports', [])
+            new_ports = []
+            for port in ports:
+                if isinstance(port, str) and ':' in port:
+                    host_port, container_port = port.split(':', 1)
+                    new_ports.append(container_port)
+                else:
+                    new_ports.append(port)
+            service['ports'] = new_ports
+        return updated_compose

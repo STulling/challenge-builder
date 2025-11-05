@@ -145,7 +145,7 @@ func main() {
 		portName = fmt.Sprintf("%d/%s", parsePort(dcfg.Services[exposedService].Ports[0]), "TCP")
 		// if the challenge is HTTP, set the ConnectionInfo to the URL of the first service
 		if cfg.IsHTTP {
-			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(exposedService)))
+			resp.ConnectionInfo = pulumi.Sprintf("https://%s", kmp.URLs.MapIndex(pulumi.String(exposedService)).MapIndex(pulumi.String(portName)))
 		} else {
 			resp.ConnectionInfo = pulumi.Sprintf("ncat --ssl %s 1337", kmp.URLs.MapIndex(pulumi.String(exposedService)).MapIndex(pulumi.String(portName)))
 		}

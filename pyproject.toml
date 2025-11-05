@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctf-challenge-builder"
-version = "0.2.22"
+version = "0.2.23"
 description = "Build challenge images and create OCI deployment packages for CTF challenges"
 readme = "README.md"
 license = "MIT"

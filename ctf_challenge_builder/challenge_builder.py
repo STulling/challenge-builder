@@ -165,6 +165,7 @@ class ChallengeBuilder:
             self.docker.login(self.docker.oci_username, self.docker.oci_password)
             image_substitutions = self.docker.build_and_push_images(compose_data, self.challenge_dir)
             updated_compose_data = DockerManager.substitute_images(compose_data, image_substitutions)
+            updated_compose_data = DockerManager.update_ports(updated_compose_data)
 
             # Verify services exist
             services = list(compose_data.get("services", {}).keys())
