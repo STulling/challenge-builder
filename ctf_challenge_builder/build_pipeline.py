@@ -57,7 +57,7 @@ class BuildPipeline:
         os.environ['CGO_ENABLED'] = '0'
         build_cmd = [
             'go', 'build', '-o', 'main',
-            '-ldflags', f"-w -X main.Subdomain={self.subdomain} -X main.CtfDomain={self.ctf_domain}",
+            '-ldflags', f"-s -w -X main.Subdomain={self.subdomain} -X main.CtfDomain={self.ctf_domain}",
             "main.go"
         ]
         subprocess.run(build_cmd, cwd=self.build_dir, check=True, capture_output=True, text=True)
