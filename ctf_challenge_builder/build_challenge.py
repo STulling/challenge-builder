@@ -111,6 +111,17 @@ def main():
         action="store_true",
         help="Disable TLS certificate verification when talking to CTFd",
     )
+    parser.add_argument(
+        "--ctfd-timeout",
+        type=int,
+        default=None,
+        help="Timeout in seconds for CTFd operations (default: 60; can also be set via CTFD_TIMEOUT)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging for CTFd requests and responses",
+    )
 
     args = parser.parse_args()
     
@@ -145,6 +156,16 @@ def main():
     if env_verify is not None:
         ctfd_verify_ssl = _env_or_default(env_verify, ctfd_verify_ssl)
 
+    # Timeout configuration (CLI flag overrides env; default 60s)
+    ctfd_timeout = args.ctfd_timeout
+    if ctfd_timeout is None:
+        env_timeout = os.getenv("CTFD_TIMEOUT")
+        try:
+            ctfd_timeout = int(env_timeout) if env_timeout else 60
+        except ValueError:
+            Logger.warning("Invalid CTFD_TIMEOUT value; falling back to 60 seconds")
+            ctfd_timeout = 60
+
     builder = ChallengeBuilder(
         challenge_dir=args.challenge_dir,
         subdomain=subdomain,
@@ -153,6 +174,8 @@ def main():
         ctfd_username=ctfd_username,
         ctfd_password=ctfd_password,
         ctfd_verify_ssl=ctfd_verify_ssl,
+        ctfd_timeout=ctfd_timeout,
+        ctfd_verbose=args.verbose,
         oci_username=oci_username,
         oci_password=oci_password,
     )

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
+from .logger import Logger
 
 
 class CTFdClientError(RuntimeError):
@@ -95,6 +96,7 @@ class CTFdClient:
         password: Optional[str] = None,
         verify_ssl: bool = True,
         timeout: int = 15,
+        verbose: bool = False,
     ):
         if not base_url:
             raise ValueError("base_url is required to talk to CTFd")
@@ -107,6 +109,48 @@ class CTFdClient:
         self._session.verify = verify_ssl
         self._authenticated = False
         self._csrf_token: Optional[str] = None
+        self._verbose = verbose
+
+    # ------------------------------------------------------------------ #
+    # Request helper with verbose logging
+    # ------------------------------------------------------------------ #
+
+    def _request(self, method: str, path_or_url: str, **kwargs) -> requests.Response:
+        url = self._url(path_or_url)
+        timeout = kwargs.pop("timeout", self._timeout)
+        if self._verbose:
+            parts = [f"CTFd {method} {url}"]
+            if "params" in kwargs and isinstance(kwargs["params"], dict):
+                parts.append(f"params={list(kwargs['params'].keys())}")
+            if "json" in kwargs and isinstance(kwargs["json"], dict):
+                parts.append(f"json_keys={list(kwargs['json'].keys())}")
+            if "data" in kwargs and isinstance(kwargs["data"], dict):
+                # Do not print sensitive values like passwords; only keys
+                parts.append(f"form_keys={list(kwargs['data'].keys())}")
+            if "files" in kwargs and isinstance(kwargs["files"], dict):
+                file_desc = []
+                for field, value in kwargs["files"].items():
+                    try:
+                        filename = value[0]
+                    except Exception:
+                        filename = "<file>"
+                    file_desc.append(f"{field}:{filename}")
+                parts.append("files=[" + ", ".join(file_desc) + "]")
+            Logger.info(" | ".join(parts))
+        try:
+            resp = self._session.request(method, url, timeout=timeout, **kwargs)
+            if self._verbose:
+                ct = resp.headers.get("Content-Type", "")
+                cl = resp.headers.get("Content-Length", "?")
+                elapsed_ms = int(getattr(resp, "elapsed", 0).total_seconds() * 1000) if getattr(resp, "elapsed", None) else 0
+                Logger.info(
+                    f"CTFd <- {resp.status_code} {resp.reason} in {elapsed_ms}ms | content-type={ct} | content-length={cl}"
+                )
+            return resp
+        except requests.RequestException as e:
+            if self._verbose:
+                Logger.error(f"CTFd request error: {type(e).__name__}: {e}")
+            raise
 
     # ------------------------------------------------------------------ #
     # Public entry points
@@ -199,25 +243,25 @@ class CTFdClient:
 
     def _login_with_password(self):
         login_url = self._url("/login")
-        response = self._session.get(login_url, timeout=self._timeout)
+        response = self._request("GET", login_url)
         response.raise_for_status()
         nonce = self._extract_login_nonce(response.text)
         if not nonce:
             raise CTFdAuthError("Failed to discover CSRF nonce on CTFd login page")
 
         payload = {"name": self._username, "password": self._password, "nonce": nonce}
-        submit = self._session.post(
+        submit = self._request(
+            "POST",
             login_url,
             data=payload,
             allow_redirects=False,
-            timeout=self._timeout,
         )
         if submit.status_code not in (200, 302, 303):
             raise CTFdAuthError(f"Login failed with status {submit.status_code}")
 
         if submit.is_redirect:
             location = submit.headers.get("Location", "/")
-            self._session.get(self._url(location), timeout=self._timeout)
+            self._request("GET", self._url(location))
 
         csrf_token = self._extract_session_nonce() or nonce
         self._csrf_token = csrf_token
@@ -231,10 +275,10 @@ class CTFdClient:
         tags: List[str],
     ) -> int:
         body = self._filter_challenge_payload(payload)
-        response = self._session.post(
+        response = self._request(
+            "POST",
             self._url("/api/v1/challenges"),
             json=body,
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         if not data.get("success"):
@@ -259,10 +303,10 @@ class CTFdClient:
         tags: List[str],
     ):
         body = self._filter_challenge_payload(payload)
-        response = self._session.patch(
+        response = self._request(
+            "PATCH",
             self._url(f"/api/v1/challenges/{challenge_id}"),
             json=body,
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         if not data.get("success"):
@@ -277,9 +321,9 @@ class CTFdClient:
         desired_values = set(tag.strip() for tag in user_tags or [] if tag.strip())
         desired_values.add(f"{self.BUILDER_TAG_PREFIX}{builder_hash}")
 
-        existing = self._session.get(
+        existing = self._request(
+            "GET",
             self._url(f"/api/v1/challenges/{challenge_id}/tags"),
-            timeout=self._timeout,
         )
         data = self._extract_json(existing)
         remote_tags = {item["value"]: item["id"] for item in data.get("data", [])}
@@ -290,19 +334,19 @@ class CTFdClient:
 
         for value in desired_values:
             if value not in remote_tags:
-                self._session.post(
+                self._request(
+                    "POST",
                     self._url(f"/api/v1/challenges/{challenge_id}/tags"),
                     json={"value": value},
-                    timeout=self._timeout,
                 )
 
     def _sync_flags(self, challenge_id: int, flags: List[Dict[str, Any]]):
         if flags is None:
             return
 
-        response = self._session.get(
+        response = self._request(
+            "GET",
             self._url(f"/api/v1/challenges/{challenge_id}/flags"),
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         existing = data.get("data", [])
@@ -316,10 +360,10 @@ class CTFdClient:
                 "type": flag.get("type", "static"),
                 "data": flag.get("data"),
             }
-            response = self._session.post(
+            response = self._request(
+                "POST",
                 self._url("/api/v1/flags"),
                 json=payload,
-                timeout=self._timeout,
             )
             upload_data = self._extract_json(response)
             if not upload_data.get("success"):
@@ -331,9 +375,9 @@ class CTFdClient:
         if hints is None:
             return
 
-        response = self._session.get(
+        response = self._request(
+            "GET",
             self._url(f"/api/v1/challenges/{challenge_id}/hints"),
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         existing = data.get("data", [])
@@ -348,10 +392,10 @@ class CTFdClient:
             }
             if hint.get("type"):
                 payload["type"] = hint["type"]
-            response = self._session.post(
+            response = self._request(
+                "POST",
                 self._url("/api/v1/hints"),
                 json=payload,
-                timeout=self._timeout,
             )
             upload_data = self._extract_json(response)
             if not upload_data.get("success"):
@@ -360,9 +404,9 @@ class CTFdClient:
                 )
 
     def _sync_files(self, challenge_id: int, attachments: List[AttachmentSpec]):
-        response = self._session.get(
+        response = self._request(
+            "GET",
             self._url(f"/api/v1/challenges/{challenge_id}/files"),
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         existing = data.get("data", [])
@@ -378,11 +422,11 @@ class CTFdClient:
                 }
                 if self._csrf_token and "Authorization" not in self._session.headers:
                     form_data["nonce"] = self._csrf_token
-                response = self._session.post(
+                response = self._request(
+                    "POST",
                     self._url("/api/v1/files"),
                     data=form_data,
                     files=files,
-                    timeout=self._timeout,
                 )
                 content_type = response.headers.get("Content-Type", "")
                 if "json" in content_type.lower():
@@ -407,10 +451,10 @@ class CTFdClient:
         return filtered
 
     def _get_challenge(self, challenge_id: int) -> Optional[Dict[str, Any]]:
-        response = self._session.get(
+        response = self._request(
+            "GET",
             self._url(f"/api/v1/challenges/{challenge_id}"),
             params={"view": "admin"},
-            timeout=self._timeout,
         )
         data = self._extract_json(response)
         if not data.get("success"):
@@ -437,10 +481,10 @@ class CTFdClient:
         page = 1
         expected_lower = expected.lower()
         while True:
-            response = self._session.get(
+            response = self._request(
+                "GET",
                 self._url("/api/v1/challenges"),
                 params={"view": "admin", "per_page": 100, "page": page},
-                timeout=self._timeout,
             )
             data = self._extract_json(response)
             if not data.get("success"):
@@ -497,7 +541,7 @@ class CTFdClient:
         return None
 
     def _extract_session_nonce(self) -> Optional[str]:
-        response = self._session.get(self._url("/"), timeout=self._timeout)
+        response = self._request("GET", self._url("/"))
         if response.ok:
             match = self._JS_NONCE_RE.search(response.text)
             if match:
@@ -510,20 +554,20 @@ class CTFdClient:
 
     def _delete(self, url: str):
         if "Authorization" in self._session.headers:
-            self._session.delete(url, timeout=self._timeout)
+            self._request("DELETE", url)
         else:
-            self._session.delete(
+            self._request(
+                "DELETE",
                 url,
-                timeout=self._timeout,
                 headers={"Content-Type": "application/json"},
                 json={},
             )
 
     def _fetch_challenge_tags(self, challenge_id: int) -> List[Dict[str, Any]]:
         try:
-            response = self._session.get(
+            response = self._request(
+                "GET",
                 self._url(f"/api/v1/challenges/{challenge_id}/tags"),
-                timeout=self._timeout,
             )
             data = self._extract_json(response)
             if data.get("success"):

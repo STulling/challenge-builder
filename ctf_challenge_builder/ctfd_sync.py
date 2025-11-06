@@ -21,13 +21,15 @@ class CTFdSync:
 
     def __init__(self, challenge_dir: Path, dist_dir: Path, ctfd_url: Optional[str],
                  ctfd_username: Optional[str], ctfd_password: Optional[str], 
-                 ctfd_verify_ssl: bool = True):
+                 ctfd_verify_ssl: bool = True, ctfd_timeout: int = 60, ctfd_verbose: bool = False):
         self.challenge_dir = challenge_dir
         self.dist_dir = dist_dir
         self.ctfd_url = ctfd_url.rstrip("/") if ctfd_url else None
         self.ctfd_username = ctfd_username
         self.ctfd_password = ctfd_password
         self.ctfd_verify_ssl = ctfd_verify_ssl
+        self.ctfd_timeout = ctfd_timeout
+        self.ctfd_verbose = ctfd_verbose
         self.bundle_manager = BundleManager(challenge_dir, dist_dir)
 
     def _collect_attachments(self, ctfd_cfg: Dict[str, Any]) -> List[AttachmentSpec]:
@@ -182,6 +184,8 @@ class CTFdSync:
             username=self.ctfd_username,
             password=self.ctfd_password,
             verify_ssl=self.ctfd_verify_ssl,
+            timeout=self.ctfd_timeout,
+            verbose=self.ctfd_verbose,
         )
 
         try:
