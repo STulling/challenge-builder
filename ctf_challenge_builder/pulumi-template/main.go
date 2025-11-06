@@ -126,7 +126,7 @@ func main() {
 		}
 		kmp, err := k8s.NewKompose(req.Ctx, cfg.Name, &k8s.KomposeArgs{
 			Identity: pulumi.String(req.Config.Identity),
-			Hostname: pulumi.String(cfg.Ctfd.Slug + "." + Subdomain + "." + CtfDomain),
+			Hostname: pulumi.String(Subdomain + "." + CtfDomain),
 			YAML:     pulumi.String(dc),
 			Ports: k8s.PortBindingMapArray{
 				exposedService: {
