@@ -57,7 +57,8 @@ class CTFdSync:
 
         # Merge fields from various sources
         fallback_keys = ["name", "category", "description", "connection_info", "state", 
-                        "value", "initial", "minimum", "decay", "requirements", "type"]
+                        "value", "initial", "minimum", "decay", "requirements", "type",
+                        "min", "max", "destroy_on_flag", "updateStrategy"]
         
         for key in fallback_keys:
             if key not in payload:
@@ -106,6 +107,12 @@ class CTFdSync:
         if payload["type"] == "dynamic_iac":
             if not payload.get("destroy_on_flag"):
                 payload["destroy_on_flag"] = True
+            if not payload.get("updateStrategy"):
+                payload["updateStrategy"] = "recreate"
+            if not payload.get("min"):
+                payload["min"] = 5
+            if not payload.get("max"):
+                payload["max"] = 100
 
         return {k: v for k, v in payload.items() if v is not None}
 
