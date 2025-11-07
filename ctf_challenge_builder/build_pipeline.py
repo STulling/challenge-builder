@@ -70,10 +70,13 @@ class BuildPipeline:
     def push_to_oci_registry(self, package_name: str):
         """Push build artifacts to OCI registry"""
         Logger.push("Pushing to OCI registry...")
-        
+
         oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
+        # using docker
         push_cmd = [
-            'oras', 'push', '--insecure', oci_tag,
+            'docker', 'run', '-it', '--rm',
+            '-v', f"{self.build_dir}:/workspace",
+            'ghcr.io/oras-project/oras:v1.3.0', 'push', '--insecure', oci_tag,
             '--artifact-type', 'application/vnd.ctfer-io.scenario',
             'main:application/vnd.ctfer-io.file',
             'Pulumi.yaml:application/vnd.ctfer-io.file'
