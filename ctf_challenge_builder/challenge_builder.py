@@ -70,7 +70,8 @@ class ChallengeBuilder:
             ctfd_username, ctfd_password, ctfd_verify_ssl, ctfd_timeout, ctfd_verbose
         )
         self.build_pipeline = BuildPipeline(
-            self.build_dir, self.subdomain, self.ctf_domain, self.registry
+            self.build_dir, self.subdomain, self.ctf_domain, self.registry, 
+            oci_username, oci_password
         )
         
         # Store OCI credentials for docker login

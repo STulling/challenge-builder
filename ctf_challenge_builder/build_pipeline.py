@@ -15,11 +15,14 @@ from .logger import Logger
 class BuildPipeline:
     """Handles Go compilation and OCI registry operations"""
 
-    def __init__(self, build_dir: Path, subdomain: str, ctf_domain: str, registry: str):
+    def __init__(self, build_dir: Path, subdomain: str, ctf_domain: str, registry: str, 
+                 oci_username: Optional[str] = None, oci_password: Optional[str] = None):
         self.build_dir = build_dir
         self.subdomain = subdomain
         self.ctf_domain = ctf_domain
         self.registry = registry
+        self.oci_username = oci_username
+        self.oci_password = oci_password
         self.oci_digest: Optional[str] = None
 
     def prepare_build_directory(self, template_folder: Path, challenge_yml_path: Path, 
@@ -76,7 +79,10 @@ class BuildPipeline:
         push_cmd = [
             'docker', 'run', '-it', '--rm',
             '-v', f"{self.build_dir}:/workspace",
-            'ghcr.io/oras-project/oras:v1.3.0', 'push', '--insecure', oci_tag,
+            'ghcr.io/oras-project/oras:v1.3.0', 'push', 
+            '-u', self.oci_username,
+            '-p', self.oci_password,
+            '--insecure', oci_tag,
             '--artifact-type', 'application/vnd.ctfer-io.scenario',
             'main:application/vnd.ctfer-io.file',
             'Pulumi.yaml:application/vnd.ctfer-io.file'
