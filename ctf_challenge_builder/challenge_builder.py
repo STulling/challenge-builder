@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+import traceback
 
 import requests
 import yaml
@@ -209,6 +210,7 @@ class ChallengeBuilder:
 
         except Exception as e:
             Logger.error(f"Build failed: {e}")
+            traceback.print_exc()
             raise
         finally:
             self.build_pipeline.cleanup()
