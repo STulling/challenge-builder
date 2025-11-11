@@ -16,17 +16,19 @@ class BundleManager:
         self.challenge_dir = challenge_dir
         self.dist_dir = dist_dir
 
-    def _add_path_to_zip(self, zip_handle: zipfile.ZipFile, source: Path):
+    def _add_path_to_zip(self, zip_handle: zipfile.ZipFile, source: Path, slug_prefix: str):
         """Add a file or directory to a zip archive"""
         source = source.resolve()
         if source.is_dir():
             for file_path in sorted(source.rglob("*")):
                 if file_path.is_file():
                     arcname = file_path.relative_to(self.challenge_dir)
-                    zip_handle.write(file_path, arcname.as_posix())
+                    arcname_with_prefix = Path(slug_prefix) / arcname
+                    zip_handle.write(file_path, arcname_with_prefix.as_posix())
         elif source.is_file():
             arcname = source.relative_to(self.challenge_dir)
-            zip_handle.write(source, arcname.as_posix())
+            arcname_with_prefix = Path(slug_prefix) / arcname
+            zip_handle.write(source, arcname_with_prefix.as_posix())
         else:
             raise FileNotFoundError(f"Bundle entry not found: {source}")
 
@@ -49,7 +51,7 @@ class BundleManager:
         with zipfile.ZipFile(tmp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
             for item in include_items:
                 entry_path = (self.challenge_dir / item).resolve()
-                self._add_path_to_zip(zip_handle, entry_path)
+                self._add_path_to_zip(zip_handle, entry_path, sanitized)
 
         # Rename with hash
         digest = sha256_file(tmp_zip_path)
