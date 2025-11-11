@@ -18,8 +18,8 @@ import requests
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
 
-import importlib.metadata
-__version__ = importlib.metadata.version("ctf-challenge-builder")
+# TODO: Make work better
+__version__ = "0.2.42"  # Should match pyproject.toml version
 
 
 def check_for_updates():
