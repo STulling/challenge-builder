@@ -19,7 +19,7 @@ from .challenge_builder import ChallengeBuilder
 from .logger import Logger
 
 # TODO: Make work better
-__version__ = "0.2.42"  # Should match pyproject.toml version
+__version__ = "0.2.44"  # Should match pyproject.toml version
 
 
 def check_for_updates():
