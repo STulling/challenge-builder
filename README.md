@@ -49,10 +49,12 @@ Define the challenge payload inside `challenge.yml` under a `ctfd` key. Example 
 ```yaml
 name: Holiday Hack
 category: Web
+tags:
+  - web
+  - holiday
 ctfd:
   type: dynamic_iac
   slug: holiday-hack
-  tags: ["web", "holiday"]
   bundle:
     include:
       - public/
@@ -102,6 +104,30 @@ ctfd:
 ```
 
 For classic dynamic challenges, set `type: dynamic` and (optionally) place any extra fields inside a `dynamic` block. When a `ctfd` section is present, the builder automatically hashes the payload plus attachments—including the generated bundle—and only updates the remote challenge when the hash changes.
+
+### Tags
+
+Tags can be defined in two ways:
+
+1. **Top-level tags** in `challenge.yml` (recommended):
+   ```yaml
+   name: My Challenge
+   category: Web
+   tags:
+     - web
+     - docker
+     - beginner
+   ```
+
+2. **CTFd-specific tags** under the `ctfd` section:
+   ```yaml
+   ctfd:
+     tags:
+       - special-event
+       - advanced
+   ```
+
+Tags defined at the top level will be merged with any CTFd-specific tags.
 
 \*Skipping TLS verification is discouraged; only use it for local development.
 

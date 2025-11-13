@@ -58,7 +58,7 @@ class CTFdSync:
         # Merge fields from various sources
         fallback_keys = ["name", "category", "description", "connection_info", "state", 
                         "value", "initial", "minimum", "decay", "requirements", "type",
-                        "min", "max", "destroy_on_flag"]
+                        "min", "max", "destroy_on_flag", "tags"]
         
         for key in fallback_keys:
             if key not in payload:

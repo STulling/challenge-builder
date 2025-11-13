@@ -86,7 +86,6 @@ def calculate_sync_hash(payload: Dict[str, Any], attachments: Iterable[Attachmen
 class CTFdClient:
     """Small helper for synchronising challenges with CTFd."""
 
-    BUILDER_TAG_PREFIX = "builder-sync:"
     _JS_NONCE_RE = re.compile(r"'csrfNonce'\s*:\s*\"([a-f0-9]+)\"", re.IGNORECASE)
 
     def __init__(
@@ -177,7 +176,7 @@ class CTFdClient:
             challenge_id: Optional fixed remote identifier.
             slug: Optional slug for lookup.
             name: Challenge name, used as a lookup fall-back.
-            tags: Desired user-defined tags (without the builder hash tag).
+            tags: Desired user-defined tags.
         """
         self._authenticate()
 
@@ -188,22 +187,12 @@ class CTFdClient:
             existing = self._find_challenge(slug=slug, name=name or payload.get("name"))
 
         if existing:
-            remote_hash = self._extract_builder_hash(existing)
-            if remote_hash == builder_hash:
-                return ChallengeSyncResult(
-                    challenge_id=existing["id"],
-                    status="skipped",
-                    local_hash=builder_hash,
-                    remote_hash=remote_hash,
-                    detail="Remote challenge already matches local definition.",
-                )
-
             self._update_challenge(existing["id"], payload, attachments, builder_hash, tags or [])
             return ChallengeSyncResult(
                 challenge_id=existing["id"],
                 status="updated",
                 local_hash=builder_hash,
-                remote_hash=remote_hash,
+                remote_hash=None,
             )
 
         new_id = self._create_challenge(payload, attachments, builder_hash, tags or [])
@@ -319,7 +308,6 @@ class CTFdClient:
 
     def _sync_tags(self, challenge_id: int, user_tags: List[str], builder_hash: str):
         desired_values = set(tag.strip() for tag in user_tags or [] if tag.strip())
-        desired_values.add(f"{self.BUILDER_TAG_PREFIX}{builder_hash}")
 
         existing = self._request(
             "GET",
@@ -336,8 +324,8 @@ class CTFdClient:
             if value not in remote_tags:
                 self._request(
                     "POST",
-                    self._url(f"/api/v1/challenges/{challenge_id}/tags"),
-                    json={"value": value},
+                    self._url("/api/v1/tags"),
+                    json={"value": value, "challenge": challenge_id},
                 )
 
     def _sync_flags(self, challenge_id: int, flags: List[Dict[str, Any]]):
@@ -499,14 +487,6 @@ class CTFdClient:
             if not next_page:
                 break
             page = next_page
-        return None
-
-    def _extract_builder_hash(self, challenge: Dict[str, Any]) -> Optional[str]:
-        tags = challenge.get("tags", [])
-        for tag in tags:
-            value = tag.get("value", "")
-            if value.startswith(self.BUILDER_TAG_PREFIX):
-                return value[len(self.BUILDER_TAG_PREFIX) :]
         return None
 
     # ------------------------------------------------------------------ #
