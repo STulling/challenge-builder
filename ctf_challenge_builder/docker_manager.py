@@ -123,14 +123,14 @@ class DockerManager:
             Logger.error(f"Docker login failed: {error_msg}")
             raise RuntimeError(f"Docker login failed: {error_msg}")
 
-    def build_and_push_images(self, compose_data: Dict[str, Any], challenge_dir: Path) -> Dict[str, str]:
+    def build_and_push_images(self, compose_data: Dict[str, Any], challenge_dir: Path, slug: str) -> Dict[str, str]:
         """Build and push Docker images from docker-compose"""
         Logger.build("Building and pushing Docker images...")
         services = compose_data.get('services', {})
         image_substitutions = {}
         
         for service_name, service_config in services.items():
-            new_image_tag = f"{self.registry}/{self.subdomain}/{service_name}:latest"
+            new_image_tag = f"{self.registry}/{self.subdomain}/{slug}-{service_name}:latest"
             
             # Determine if build is needed
             if 'build' in service_config:

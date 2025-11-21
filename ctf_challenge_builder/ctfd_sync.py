@@ -125,7 +125,7 @@ class CTFdSync:
 
     def sync(self, challenge_data: Dict[str, Any], package_name: str, oci_reference: Optional[str]):
         """Synchronize challenge with CTFd"""
-        ctfd_cfg = challenge_data.get("ctfd")
+        ctfd_cfg: Dict[str, Any] = challenge_data.get("ctfd")
         if not ctfd_cfg:
             return
 

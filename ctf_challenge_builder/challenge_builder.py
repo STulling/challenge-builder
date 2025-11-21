@@ -167,7 +167,7 @@ class ChallengeBuilder:
             # Build and push Docker images
             compose_data = self._read_docker_compose()
             self.docker.login(self.docker.oci_username, self.docker.oci_password)
-            image_substitutions = self.docker.build_and_push_images(compose_data, self.challenge_dir)
+            image_substitutions = self.docker.build_and_push_images(compose_data, self.challenge_dir, scenario_slug)
             updated_compose_data = DockerManager.substitute_images(compose_data, image_substitutions)
             updated_compose_data = DockerManager.update_ports(updated_compose_data)
 

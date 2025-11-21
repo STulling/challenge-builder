@@ -10,43 +10,55 @@ import argparse
 import getpass
 import os
 import sys
-
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 
 from .challenge_builder import ChallengeBuilder
 from .logger import Logger
+from .utils import get_version
 
-# TODO: Make work better
-__version__ = "0.2.44"  # Should match pyproject.toml version
+__version__ = get_version()
+
+# GitHub repository for version checks
+GITHUB_REPO = "STulling/challenge-builder"
+VERSION_CHECK_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/refs/heads/main/pyproject.toml"
 
 
 def check_for_updates():
     """Check if a new version of the tool is available on GitHub"""
     try:
-        response = requests.get(
-            "https://raw.githubusercontent.com/STulling/challenge-builder/refs/heads/main/pyproject.toml",
-            timeout=5
-        )
-        if response.status_code == 200:
-            # Parse version from pyproject.toml content
-            for line in response.text.split('\n'):
-                if line.strip().startswith('version = '):
-                    # Extract version string (format: version = "0.2.12")
-                    latest_version = line.split('=')[1].strip().strip('"\'')
-                    if latest_version != __version__:
-                        Logger.warning(f"A new version ({latest_version}) is available. You are using version {__version__}.")
-                        Logger.info(f"Update with: pipx upgrade ctf-challenge-builder")
-                        print()
-                        exit(0)
-                    else:
-                        Logger.info(f"You are using the latest version ({__version__})")
-                        print()
-                    break
-    except Exception:
-        # Silently fail if we can't check for updates
+        response = requests.get(VERSION_CHECK_URL, timeout=5)
+        response.raise_for_status()
+        
+        # Parse version from pyproject.toml content
+        latest_version = None
+        for line in response.text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('version =') or stripped.startswith('version='):
+                # Extract version string (handles: version = "0.2.12" or version="0.2.12")
+                version_part = stripped.split('=', 1)[1].strip()
+                latest_version = version_part.strip('"\'')
+                break
+        
+        if not latest_version:
+            return  # Could not parse version from remote file
+        
+        if latest_version != __version__:
+            Logger.warning(f"A new version ({latest_version}) is available. You are using version {__version__}.")
+            Logger.info("Update with: pipx upgrade ctf-challenge-builder")
+            print()
+        else:
+            Logger.info(f"You are using the latest version ({__version__})")
+            print()
+            
+    except requests.RequestException:
+        # Silently fail if we can't reach GitHub (offline, network issues, etc.)
         pass
+    except Exception as e:
+        # Log unexpected errors but don't crash
+        Logger.warning(f"Could not check for updates: {e}")
 
 
 def _env_or_default(value: str, default: bool) -> bool:
