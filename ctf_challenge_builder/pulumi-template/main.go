@@ -45,6 +45,43 @@ type Service struct {
 	DependsOn   []string          `yaml:"depends_on"`
 }
 
+func sanitizeComposeForKompose(in DockerCompose) DockerCompose {
+	out := DockerCompose{
+		Version:  in.Version,
+		Services: make(map[string]Service, len(in.Services)),
+	}
+
+	for name, svc := range in.Services {
+		sanitizedPorts := make([]string, 0, len(svc.Ports))
+		for _, port := range svc.Ports {
+			switch {
+			case strings.HasSuffix(port, "/HTTP"):
+				sanitizedPorts = append(sanitizedPorts, strings.TrimSuffix(port, "/HTTP")+"/tcp")
+			case strings.HasSuffix(port, "/http"):
+				sanitizedPorts = append(sanitizedPorts, strings.TrimSuffix(port, "/http")+"/tcp")
+			default:
+				sanitizedPorts = append(sanitizedPorts, port)
+			}
+		}
+
+		copiedEnv := map[string]string{}
+		for k, v := range svc.Environment {
+			copiedEnv[k] = v
+		}
+
+		copiedDependsOn := append([]string(nil), svc.DependsOn...)
+
+		out.Services[name] = Service{
+			Image:       svc.Image,
+			Ports:       sanitizedPorts,
+			Environment: copiedEnv,
+			DependsOn:   copiedDependsOn,
+		}
+	}
+
+	return out
+}
+
 func parsePort(p string) int {
 	// strip protocol suffix if present: "1234/tcp"
 	if idx := strings.Index(p, "/"); idx != -1 {
@@ -180,34 +217,36 @@ func main() {
 			return fmt.Errorf("no services with exposed ports found")
 		}
 
+		deploymentCompose := sanitizeComposeForKompose(dcfg)
+
 		// Inject public URLs as environment variables into all services
 		// Format: PUBLIC_URL_<SERVICE>_<PORT> (e.g., PUBLIC_URL_ANVIL_8545)
 		for _, pi := range exposedPorts {
 			envKey := fmt.Sprintf("PUBLIC_URL_%s_%d", strings.ToUpper(pi.serviceName), pi.port)
-			for name, svc := range dcfg.Services {
+			for name, svc := range deploymentCompose.Services {
 				if svc.Environment == nil {
 					svc.Environment = map[string]string{}
 				}
 				svc.Environment[envKey] = pi.publicURL
-				dcfg.Services[name] = svc
+				deploymentCompose.Services[name] = svc
 			}
 		}
 
 		// Apply additional env overrides from config
 		if len(envOverrides) > 0 {
-			for name, svc := range dcfg.Services {
+			for name, svc := range deploymentCompose.Services {
 				if svc.Environment == nil {
 					svc.Environment = map[string]string{}
 				}
 				for envKey, envValue := range envOverrides {
 					svc.Environment[envKey] = envValue
 				}
-				dcfg.Services[name] = svc
+				deploymentCompose.Services[name] = svc
 			}
 		}
 
 		// Re-marshal the docker-compose with injected env vars
-		updated, err := yaml.Marshal(dcfg)
+		updated, err := yaml.Marshal(deploymentCompose)
 		if err != nil {
 			return err
 		}
