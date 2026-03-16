@@ -38,10 +38,50 @@ type DockerCompose struct {
 	Version  string
 	Services map[string]Service
 }
+
+type ComposeEnvironment map[string]string
+
+func (e *ComposeEnvironment) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		*e = ComposeEnvironment{}
+		return nil
+	}
+
+	switch value.Kind {
+	case yaml.MappingNode:
+		var envMap map[string]string
+		if err := value.Decode(&envMap); err != nil {
+			return err
+		}
+		*e = ComposeEnvironment(envMap)
+		return nil
+
+	case yaml.SequenceNode:
+		envMap := make(map[string]string, len(value.Content))
+		for _, item := range value.Content {
+			entry := item.Value
+			key, rawValue, found := strings.Cut(entry, "=")
+			if found {
+				envMap[key] = rawValue
+			} else {
+				envMap[key] = ""
+			}
+		}
+		*e = ComposeEnvironment(envMap)
+		return nil
+
+	case 0:
+		*e = ComposeEnvironment{}
+		return nil
+	}
+
+	return fmt.Errorf("unsupported environment format in docker-compose")
+}
+
 type Service struct {
 	Image       string
 	Ports       []string
-	Environment map[string]string `yaml:"environment"`
+	Environment ComposeEnvironment `yaml:"environment"`
 	DependsOn   []string          `yaml:"depends_on"`
 }
 
