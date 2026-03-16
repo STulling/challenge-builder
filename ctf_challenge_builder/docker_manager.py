@@ -51,7 +51,7 @@ class DockerManager:
 
         try:
             return subprocess.run(
-                prepared_cmd, cwd=cwd, input=input_text, text=True if input_text else False,
+                prepared_cmd, cwd=cwd, input=input_text, text=True,
                 capture_output=silent, check=True, timeout=timeout
             )
         except subprocess.TimeoutExpired as exc:
