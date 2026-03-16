@@ -38,7 +38,8 @@ class DockerManager:
         return cmd
 
     def run_docker_command(self, cmd: List[str], cwd: Optional[Path] = None, 
-                          input_text: Optional[str] = None, silent: bool = False) -> subprocess.CompletedProcess:
+                          input_text: Optional[str] = None, silent: bool = False,
+                          timeout: Optional[int] = None) -> subprocess.CompletedProcess:
         """Execute a docker command"""
         prepared_cmd = self._prepare_command(cmd)
         
@@ -51,8 +52,15 @@ class DockerManager:
         try:
             return subprocess.run(
                 prepared_cmd, cwd=cwd, input=input_text, text=True if input_text else False,
-                capture_output=silent, check=True
+                capture_output=silent, check=True, timeout=timeout
             )
+        except subprocess.TimeoutExpired as exc:
+            logger.error(f"Command timed out after {timeout} seconds: {' '.join(cmd)}")
+            if exc.stdout:
+                logger.error(str(exc.stdout).strip())
+            if exc.stderr:
+                logger.error(str(exc.stderr).strip())
+            raise
         except subprocess.CalledProcessError as exc:
             logger.error(f"Command failed ({exc.returncode}): {' '.join(cmd)}")
             if exc.stdout:

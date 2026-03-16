@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+OCI_PUSH_TIMEOUT_SECONDS = 300
+
 
 class BuildPipeline:
     """Handles Go compilation and OCI registry operations"""
@@ -108,8 +110,9 @@ class BuildPipeline:
         oci_tag = f"{self.registry}/{self.subdomain}/{package_name}-scenario:latest"
         # using docker
         push_cmd = [
-            'docker', 'run', '-it', '--rm',
+            'docker', 'run', '--rm',
             '-v', f"{self.build_dir}:/workspace",
+            '-w', '/workspace',
             'ghcr.io/oras-project/oras:v1.3.0', 'push', 
             '-u', self.docker_manager.oci_username,
             '-p', self.docker_manager.oci_password,
@@ -120,7 +123,17 @@ class BuildPipeline:
         ]
         
         try:
-            result = self.docker_manager.run_docker_command(push_cmd, cwd=self.build_dir, silent=True)
+            logger.info(
+                "Uploading OCI package %s (timeout: %ss)",
+                oci_tag,
+                OCI_PUSH_TIMEOUT_SECONDS,
+            )
+            result = self.docker_manager.run_docker_command(
+                push_cmd,
+                cwd=self.build_dir,
+                silent=True,
+                timeout=OCI_PUSH_TIMEOUT_SECONDS,
+            )
             
             # Parse digest
             for line in result.stdout.split('\n'):
@@ -129,6 +142,17 @@ class BuildPipeline:
                     break
             
             logger.info(f"Successfully pushed to {oci_tag}")
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "OCI push did not finish within %s seconds. This usually means the registry is unreachable, the connection is hanging, or ORAS is waiting on a slow network operation.",
+                OCI_PUSH_TIMEOUT_SECONDS,
+            )
+            logger.info(
+                "Manual push: cd %s && oras push --insecure %s main:application/vnd.ctfer-io.file Pulumi.yaml:application/vnd.ctfer-io.file",
+                self.build_dir,
+                oci_tag,
+            )
+            raise
         except subprocess.CalledProcessError:
             logger.warning("OCI push failed. You may need to install OCI CLI tools.")
             logger.info(f"Manual push: cd {self.build_dir} && oras push --insecure {oci_tag} "
