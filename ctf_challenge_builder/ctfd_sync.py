@@ -89,7 +89,7 @@ class CTFdSync:
             if payload.get("destroy_on_flag") is None:
                 payload["destroy_on_flag"] = True
             
-            payload.setdefault("min", 10)
+            payload.setdefault("min", 5)
             payload.setdefault("max", 20)
             payload.setdefault("timeout", 1800)
             
