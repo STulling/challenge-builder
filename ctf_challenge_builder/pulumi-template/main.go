@@ -82,7 +82,7 @@ type Service struct {
 	Image       string
 	Ports       []string
 	Environment ComposeEnvironment `yaml:"environment"`
-	DependsOn   []string          `yaml:"depends_on"`
+	DependsOn   []string           `yaml:"depends_on"`
 }
 
 func sanitizeComposeForKompose(in DockerCompose) DockerCompose {
