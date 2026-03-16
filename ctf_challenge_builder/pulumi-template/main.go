@@ -111,7 +111,7 @@ func main() {
 			if len(svc.Ports) == 0 {
 				continue
 			}
-			var bindings []k8s.PortBindingArgs
+			bindings := k8s.PortBindingArray{}
 			portIndexInService := 0 // Track port index within this service (matches j in kompose.go)
 			for _, p := range svc.Ports {
 				port := parsePort(p)
@@ -225,7 +225,7 @@ func main() {
 		}
 
 		// Build ConnectionInfo from all ports that should be included
-		var connectionInfoParts []pulumi.StringInput
+		var connectionInfoParts []pulumi.StringOutput
 		for _, pi := range exposedPorts {
 			if !pi.addToConnInfo {
 				continue
