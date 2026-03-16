@@ -124,9 +124,19 @@ class ChallengeBuilder:
             scenario_slug = sanitize_slug(
                 challenge_data.get("slug") or challenge_data["name"]
             )
+            challenge_type = challenge_data.get("type")
+
+            if challenge_type != "dynamic_iac":
+                logger.info(
+                    "Challenge type '%s' does not use Docker/OCI packaging; syncing to CTFd only.",
+                    challenge_type,
+                )
+                self.ctfd_sync.sync(challenge_data, None, scenario_slug)
+                logger.info("Challenge synchronisation completed successfully!")
+                return
 
             # Handle non-Docker challenges
-            if not self.has_compose and challenge_data.get("type") == "dynamic_iac":
+            if not self.has_compose:
                 logger.info("No docker-compose.yml detected; skipping Docker build steps.")
                 self.ctfd_sync.sync(challenge_data, None, scenario_slug)
                 logger.info("Challenge synchronisation completed successfully!")
