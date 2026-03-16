@@ -3,12 +3,13 @@
 
 import os
 import subprocess
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-from .logger import Logger
+logger = logging.getLogger(__name__)
 
 
 class DockerManager:
@@ -18,15 +19,16 @@ class DockerManager:
         self.registry = registry
         self.subdomain = subdomain
         self.use_sudo = use_sudo
-        self._sudo_notified = False
         self.oci_username: Optional[str] = None
         self.oci_password: Optional[str] = None
 
     def _notify_sudo_once(self):
-        """Notify user about sudo usage once"""
-        if not self._sudo_notified and self.use_sudo:
-            Logger.info("🔒 Docker commands will run with sudo. You may be prompted for your password.")
-            self._sudo_notified = True
+        """Notify user about sudo usage if password is required"""
+        if self.use_sudo:
+            try:
+                subprocess.run(['sudo', '-n', 'true'], check=True, capture_output=True)
+            except subprocess.CalledProcessError:
+                logger.info("Please provide password to use docker")
 
     def _prepare_command(self, cmd: List[str]) -> List[str]:
         """Add sudo prefix if needed"""
@@ -44,7 +46,7 @@ class DockerManager:
             display_cmd = ' '.join(cmd)
             if len(display_cmd) > 100:
                 display_cmd = display_cmd[:97] + "..."
-            Logger.step(f"Running: {display_cmd}")
+            logger.info(f"Running: {display_cmd}")
 
         try:
             return subprocess.run(
@@ -52,11 +54,11 @@ class DockerManager:
                 capture_output=silent, check=True
             )
         except subprocess.CalledProcessError as exc:
-            Logger.error(f"Command failed ({exc.returncode}): {' '.join(cmd)}")
+            logger.error(f"Command failed ({exc.returncode}): {' '.join(cmd)}")
             if exc.stdout:
-                Logger.error(exc.stdout.strip())
+                logger.error(exc.stdout.strip())
             if exc.stderr:
-                Logger.error(exc.stderr.strip())
+                logger.error(exc.stderr.strip())
             raise
 
     def is_logged_in(self) -> bool:
@@ -92,14 +94,14 @@ class DockerManager:
         """Login to the Docker registry"""
         try:
             if self.is_logged_in():
-                Logger.success(f"Authenticated to {self.registry}")
+                logger.info(f"Authenticated to {self.registry}")
                 return
         except Exception as e:
-            Logger.warning(f"Could not verify login status: {e}")
+            logger.warning(f"Could not verify login status: {e}")
 
-        Logger.warning(f"Not logged into {self.registry}.")
+        logger.warning(f"Not logged into {self.registry}.")
         if self.use_sudo:
-            Logger.info("Note: Credentials will be stored for the root user (sudo required)")
+            logger.info("Note: Credentials will be stored for the root user (sudo required)")
         
         print()
         
@@ -110,22 +112,22 @@ class DockerManager:
         password = password or self.oci_password
         
         if not username:
-            username = input(f"🔐 Username for {self.registry}: ").strip()
+            username = input(f"Username for {self.registry}: ").strip()
         if not password:
-            password = getpass.getpass(f"🔐 Password for {self.registry}: ")
+            password = getpass.getpass(f"Password for {self.registry}: ")
         
         login_cmd = ['docker', 'login', '--username', username, '--password-stdin', self.registry]
         try:
             self.run_docker_command(login_cmd, input_text=password, silent=True)
-            Logger.success("Successfully logged into Docker registry.")
+            logger.info("Successfully logged into Docker registry.")
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
-            Logger.error(f"Docker login failed: {error_msg}")
+            logger.error(f"Docker login failed: {error_msg}")
             raise RuntimeError(f"Docker login failed: {error_msg}")
 
     def build_and_push_images(self, compose_data: Dict[str, Any], challenge_dir: Path, slug: str) -> Dict[str, str]:
         """Build and push Docker images from docker-compose"""
-        Logger.build("Building and pushing Docker images...")
+        logger.info("Building and pushing Docker images...")
         services = compose_data.get('services', {})
         image_substitutions = {}
         
@@ -134,7 +136,7 @@ class DockerManager:
             
             # Determine if build is needed
             if 'build' in service_config:
-                Logger.info(f"\n📦 Building service: {service_name}")
+                logger.info(f"\nBuilding service: {service_name}")
                 
                 build_context = service_config.get('build', '.')
                 if isinstance(build_context, dict):
@@ -146,7 +148,7 @@ class DockerManager:
                 
                 self.run_docker_command(build_cmd, cwd=challenge_dir)
                 
-                Logger.info(f"📤 Pushing {service_name}")
+                logger.info(f"Pushing {service_name}")
                 self.run_docker_command(['docker', 'push', new_image_tag], silent=True)
                 image_substitutions[service_name] = new_image_tag
                 
@@ -156,8 +158,8 @@ class DockerManager:
                     image_substitutions[service_name] = current_image
                 else:
                     # Retag external image
-                    Logger.info(f"📦 Retagging external image: {service_name}")
-                    Logger.info(f"  {current_image} → {new_image_tag}")
+                    logger.info(f"Retagging external image: {service_name}")
+                    logger.info(f"  {current_image} → {new_image_tag}")
                     
                     self.run_docker_command(['docker', 'pull', current_image], silent=True)
                     self.run_docker_command(['docker', 'tag', current_image, new_image_tag], silent=True)

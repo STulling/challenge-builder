@@ -5,22 +5,24 @@ Challenge Builder - Main orchestrator
 
 import os
 import sys
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 import traceback
 
-import requests
 import yaml
 
 from .build_pipeline import BuildPipeline
 from .ctfd_sync import CTFdSync
 from .docker_manager import DockerManager
-from .logger import Logger
-from .utils import sanitize_slug
-
-requests.packages.urllib3.disable_warnings(
-    category=requests.packages.urllib3.exceptions.InsecureRequestWarning
+from .utils import (
+    sanitize_slug,
+    check_connectivity,
+    derive_registry_host,
+    validate_port_protocols,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ChallengeBuilder:
@@ -39,11 +41,12 @@ class ChallengeBuilder:
         ctfd_verbose: bool = False,
         oci_username: Optional[str] = None,
         oci_password: Optional[str] = None,
+        oci_registry: Optional[str] = None,
     ):
         self.challenge_dir = Path(challenge_dir).resolve()
         self.subdomain = subdomain
         self.ctf_domain = ctf_domain
-        self.registry = f"registry.{ctf_domain}"
+        self.registry = derive_registry_host(subdomain, ctf_domain, oci_registry)
         
         # Paths
         self.build_dir = self.challenge_dir / ".build"
@@ -72,49 +75,12 @@ class ChallengeBuilder:
         )
         self.build_pipeline = BuildPipeline(
             self.build_dir, self.subdomain, self.ctf_domain, self.registry, 
-            oci_username, oci_password
+            self.docker
         )
         
         # Store OCI credentials for docker login
         self.docker.oci_username = oci_username
         self.docker.oci_password = oci_password
-
-    def _check_connectivity(self) -> bool:
-        """Check if registry and CTF website are reachable"""
-        Logger.info("Performing sanity checks...")
-        all_ok = True
-        
-        # Check registry
-        try:
-            response = requests.get(f"https://{self.registry}/v2/", timeout=10, verify=False)
-            if response.status_code in [200, 401]:
-                Logger.success(f"Registry {self.registry} is reachable.")
-            else:
-                Logger.warning(f"Registry {self.registry} is not reachable. Build may fail.")
-                all_ok = False
-        except requests.RequestException:
-            Logger.warning(f"Registry {self.registry} is not reachable. Build may fail.")
-            all_ok = False
-        
-        # Check CTF website
-        try:
-            website = f"{self.subdomain}.{self.ctf_domain}"
-            response = requests.get(f"https://{website}", timeout=10, verify=False)
-            if response.status_code == 200:
-                Logger.success(f"CTF website {website} is up.")
-            else:
-                Logger.warning(f"CTF website {website} is not responding. Build may fail.")
-                all_ok = False
-        except requests.RequestException:
-            Logger.warning(f"CTF website {self.subdomain}.{self.ctf_domain} is not responding.")
-            all_ok = False
-
-        if not all_ok:
-            Logger.error("One or more sanity checks failed. Please resolve the issues and try again.")
-            sys.exit(1)
-        
-        print()
-        return all_ok
 
     def _read_challenge_yaml(self) -> Dict[str, Any]:
         """Read and parse challenge.yml"""
@@ -131,9 +97,9 @@ class ChallengeBuilder:
     def build(self):
         """Execute the complete build process"""
         try:
-            Logger.info(f"Building challenge in {self.challenge_dir}")
-            Logger.info(f"Subdomain: {self.subdomain}")
-            Logger.info(f"Registry: {self.registry}")
+            logger.info(f"Building challenge in {self.challenge_dir}")
+            logger.info(f"Subdomain: {self.subdomain}")
+            logger.info(f"Registry: {self.registry}")
             
             if self.use_sudo:
                 self.docker._notify_sudo_once()
@@ -146,26 +112,35 @@ class ChallengeBuilder:
                 try:
                     challenge_data = self._read_challenge_yaml()
                 except Exception as exc:
-                    Logger.warning(f"Failed to parse challenge.yml: {exc}")
+                    logger.error(f"Failed to parse challenge.yml: {exc}")
+                    raise
 
-            # Determine package name
-            package_name = challenge_data.get("name") or self.subdomain or "challenge"
+            # Validate required fields
+            required_fields = ["name", "category", "type", "description", "attribution", "flags"]
+            missing = [f for f in required_fields if not challenge_data.get(f)]
+            if missing:
+                raise ValueError(f"Missing required fields in challenge.yml: {', '.join(missing)}")
+
             scenario_slug = sanitize_slug(
-                (challenge_data.get("ctfd") or {}).get("slug") or package_name
+                challenge_data.get("slug") or challenge_data["name"]
             )
 
             # Handle non-Docker challenges
-            if not self.has_compose:
-                Logger.info("No docker-compose.yml detected; skipping Docker build steps.")
-                self.ctfd_sync.sync(challenge_data, package_name, None)
-                Logger.success("Challenge synchronisation completed successfully!")
+            if not self.has_compose and challenge_data.get("type") == "dynamic_iac":
+                logger.info("No docker-compose.yml detected; skipping Docker build steps.")
+                self.ctfd_sync.sync(challenge_data, None, scenario_slug)
+                logger.info("Challenge synchronisation completed successfully!")
                 return
 
             # Perform sanity checks
-            self._check_connectivity()
+            check_connectivity(self.registry, self.subdomain, self.ctf_domain)
 
             # Build and push Docker images
             compose_data = self._read_docker_compose()
+            
+            # Validate port protocol designations
+            validate_port_protocols(compose_data)
+            
             self.docker.login(self.docker.oci_username, self.docker.oci_password)
             image_substitutions = self.docker.build_and_push_images(compose_data, self.challenge_dir, scenario_slug)
             updated_compose_data = DockerManager.substitute_images(compose_data, image_substitutions)
@@ -175,16 +150,6 @@ class ChallengeBuilder:
             services = list(compose_data.get("services", {}).keys())
             if not services:
                 raise ValueError("No services found in docker-compose.yml")
-
-            # Update package name if needed
-            if challenge_data.get("name"):
-                package_name = challenge_data["name"]
-            else:
-                package_name = services[0]
-            
-            scenario_slug = sanitize_slug(
-                (challenge_data.get("ctfd") or {}).get("slug") or package_name
-            )
 
             # Build pipeline: prepare, compile, push
             self.build_pipeline.prepare_build_directory(
@@ -199,17 +164,17 @@ class ChallengeBuilder:
                 oci_tag = f"{self.registry}/{self.subdomain}/{scenario_slug}-scenario:latest"
                 complete_package = f"{oci_tag}@{self.build_pipeline.oci_digest}"
             else:
-                Logger.warning("Could not capture OCI digest from push output")
+                logger.warning("Could not capture OCI digest from push output")
 
             # Sync with CTFd
-            self.ctfd_sync.sync(challenge_data, package_name, complete_package)
+            self.ctfd_sync.sync(challenge_data, complete_package, scenario_slug)
 
-            Logger.success("Challenge build completed successfully!")
+            logger.info("Challenge build completed successfully!")
             if complete_package:
-                Logger.final(f"Complete registry package: {complete_package}")
+                logger.info(f"Complete registry package: {complete_package}")
 
         except Exception as e:
-            Logger.error(f"Build failed: {e}")
+            logger.error(f"Build failed: {e}")
             traceback.print_exc()
             raise
         finally:

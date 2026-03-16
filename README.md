@@ -18,129 +18,78 @@ Run from within a challenge directory that contains `docker-compose.yml` and `ch
 build-challenge --ctfd-url <ctfd-url>
 ```
 
+The builder derives the OCI registry host automatically:
+- `event.ctf.place` → `registry.ctf.place`
+- `event.com` → `registry.event.com`
+
+If your setup uses a different registry hostname, pass `--oci-registry <host>` or set `OCI_REGISTRY`.
+
 For classic (non-IaC) dynamic challenges you can omit `docker-compose.yml`; the builder will skip image/OCI packaging and only perform the CTFd synchronisation.
 
-`<ctfd-url>` should be the full URL where the challenge will run (for example, `https://web.ctf.example` or simply `web.ctf.example`). The tool will automatically extract the subdomain and base domain from this URL.
-
-### Auto-Update Check
-
-When you run the tool, it automatically checks GitHub for newer versions and notifies you if an update is available. To upgrade:
-
-```bash
-pipx upgrade ctf-challenge-builder
-# or reinstall from GitHub
-pipx install --force git+https://github.com/STulling/challenge-builder.git
-```
-
-### Sync with CTFd
-
-Provide CTFd credentials through CLI flags or environment variables to push dynamic or `dynamic_iac` challenges after the OCI package is built:
-
-```bash
-build-challenge \
-  --ctfd-url https://mychal.ctf.example \
-  --ctfd-token <api-token>
-```
-
-Equivalent environment variables: `CTFD_URL`, `CTFD_TOKEN`, `CTFD_USERNAME`, `CTFD_PASSWORD`, and `CTFD_VERIFY_SSL` (`true` by default). Supplying a token overrides username/password. Add `--ctfd-no-verify` if you need to skip TLS validation\*.
+### Challenge.yml format example
 
 Define the challenge payload inside `challenge.yml` under a `ctfd` key. Example for a `dynamic_iac` challenge:
 
 ```yaml
-name: Holiday Hack
+# General stuff:
+name: Artis
 category: Web
+type: dynamic_iac # dynamic_iac uses infrastructure as code + dynamic scoring, just use `dynamic` for offline challenges
+description: | 
+  I love visiting Artis, the zoo here in Amsterdam. \
+  They have so many amazing animals there!
+attribution: Simon
+state: visible # defaults to visible if ommitted, alternative is `hidden`
+slug: artis # you can provide a custom slug here, otherwise it will be generated from the challenge name
 tags:
-  - web
-  - holiday
-ctfd:
-  type: dynamic_iac
-  slug: holiday-hack
-  bundle:
-    include:
-      - public/
-      - README.md
-  flags:
-    - content: flag{example}
-      type: static
-  challenge:
-    name: Holiday Hack
-    category: Web
-    description: |
-      Welcome to the holidays!
-    state: hidden
-    initial: 500
-    minimum: 100
-    decay: 50
-  dynamic_iac:
-    # scenario defaults to the OCI reference produced by the builder
-    mana_cost: 3
-    timeout: 900
-    additional:
-      cpu: 2
-      env.FLAG: "FLAG_PLACEHOLDER"
+  - easy 
+bundle: # what files will be available to the user
+  include:
+    - database/
+    - website/
+    - docker-compose.yml
+flags:
+  - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
+    type: static
+
+# Stuff for challenge deployment
+is_http: true # if removed it will default to False
+initial: 500 # initial score, defaults to 500
+minimum: 50 # minimum score, defaults to 50
+decay: 50 # decay, defaults to 50
+function: linear # use either the linear or logarithmic scoring formula, defaults to linear
+dynamic_iac:
+  timeout: 1800 # time in seconds for which the challenge will be online, defaults to 1800 (30 minutes)
+  mana_cost: 0 # how much mana it costs to start a challenge, defaults to 0
+  min: 10 # minimum number of pre-provisioned instances, defaults to 10
+  max: 20 # number of instances to stop pre-provisioning at, defaults to 20
+  additional: # additional variables to add to the dockerfiles when building
+    env.FLAG: "FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}"
 ```
 
-The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. The slug defaults to `bundle.slug`, then `ctfd.slug`, and finally the challenge name. That archive is uploaded automatically (the visible filename in CTFd can be overridden with `bundle.name`). Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time; set the real flag value from the CTFd admin panel after the first sync so it never lands in the offline bundle.
-
-Example for a `dynamic` challenge that exposes a simple file bundle and static flag:
-
+A very minimal challenge could be:
 ```yaml
-name: Warmup
-category: Misc
-ctfd:
-  type: dynamic
-  slug: warmup
-  bundle:
-    include:
-      - dist/writeup.txt
-  flags:
-    - content: flag{warmup}
-      type: static
-  challenge:
-    description: |
-      Grab the file and submit the flag.
-    value: 100
-    decay: 0
+name: Artis
+category: Web
+type: dynamic_iac
+description: | 
+  I love visiting Artis, the zoo here in Amsterdam. \
+  They have so many amazing animals there!
+attribution: Simon
+tags:
+  - easy 
+bundle:
+  include:
+    - database/
+    - website/
+    - docker-compose.yml
+flags:
+  - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
+    type: static
+is_http: true 
+dynamic_iac:
+  additional:
+    env.FLAG: "FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}"
 ```
 
-For classic dynamic challenges, set `type: dynamic` and (optionally) place any extra fields inside a `dynamic` block. When a `ctfd` section is present, the builder automatically hashes the payload plus attachments—including the generated bundle—and only updates the remote challenge when the hash changes.
-
-### Tags
-
-Tags can be defined in two ways:
-
-1. **Top-level tags** in `challenge.yml` (recommended):
-   ```yaml
-   name: My Challenge
-   category: Web
-   tags:
-     - web
-     - docker
-     - beginner
-   ```
-
-2. **CTFd-specific tags** under the `ctfd` section:
-   ```yaml
-   ctfd:
-     tags:
-       - special-event
-       - advanced
-   ```
-
-Tags defined at the top level will be merged with any CTFd-specific tags.
-
-\*Skipping TLS verification is discouraged; only use it for local development.
-
-## Requirements
-
-- Docker
-- OCI CLI tools (e.g., `oras`)
-- Go (for building the deployment program)
-
-## Development
-
-To install in development mode:
-
-```bash
-pip install -e .
-```
+The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. That archive is uploaded automatically. Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time.

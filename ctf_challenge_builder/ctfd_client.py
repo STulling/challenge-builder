@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -16,7 +17,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
-from .logger import Logger
+from .utils import sha256_file
+
+logger = logging.getLogger(__name__)
 
 
 class CTFdClientError(RuntimeError):
@@ -44,18 +47,10 @@ class AttachmentSpec:
         if not resolved.is_file():
             raise FileNotFoundError(f"Attachment must be a file: {resolved}")
 
-        digest = cls._compute_digest(resolved)
+        digest = sha256_file(resolved)
         display_name = name or resolved.name
         size = resolved.stat().st_size
         return cls(path=resolved, name=display_name, digest=digest, size=size)
-
-    @staticmethod
-    def _compute_digest(path: Path) -> str:
-        sha = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                sha.update(chunk)
-        return sha.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -135,20 +130,20 @@ class CTFdClient:
                         filename = "<file>"
                     file_desc.append(f"{field}:{filename}")
                 parts.append("files=[" + ", ".join(file_desc) + "]")
-            Logger.info(" | ".join(parts))
+            logger.info(" | ".join(parts))
         try:
             resp = self._session.request(method, url, timeout=timeout, **kwargs)
             if self._verbose:
                 ct = resp.headers.get("Content-Type", "")
                 cl = resp.headers.get("Content-Length", "?")
                 elapsed_ms = int(getattr(resp, "elapsed", 0).total_seconds() * 1000) if getattr(resp, "elapsed", None) else 0
-                Logger.info(
+                logger.info(
                     f"CTFd <- {resp.status_code} {resp.reason} in {elapsed_ms}ms | content-type={ct} | content-length={cl}"
                 )
             return resp
         except requests.RequestException as e:
             if self._verbose:
-                Logger.error(f"CTFd request error: {type(e).__name__}: {e}")
+                logger.error(f"CTFd request error: {type(e).__name__}: {e}")
             raise
 
     # ------------------------------------------------------------------ #

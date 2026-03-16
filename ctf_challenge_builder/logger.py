@@ -3,68 +3,43 @@
 Logger module for Challenge Builder
 """
 
+import logging
 import sys
-from typing import Optional
 
-import colorama
-from colorama import Fore, Style
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors"""
+    
+    grey = "\x1b[38;20m"
+    green = "\x1b[32;20m"
+    yellow = "\x1b[33;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+    
+    FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 
-# Initialize colorama
-colorama.init(autoreset=True)
+    def __init__(self):
+        super().__init__(fmt=self.FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
+        self.FORMATS = {
+            logging.DEBUG: self.grey + self.FORMAT + self.reset,
+            logging.INFO: self.grey + self.FORMAT + self.reset,
+            logging.WARNING: self.yellow + self.FORMAT + self.reset,
+            logging.ERROR: self.red + self.FORMAT + self.reset,
+            logging.CRITICAL: self.bold_red + self.FORMAT + self.reset
+        }
 
-_LEVEL_STYLES = {
-    "INFO": Fore.WHITE,
-    "SUCCESS": Fore.GREEN,
-    "FINAL": Fore.GREEN,
-    "WARNING": Fore.YELLOW,
-    "ERROR": Fore.RED,
-    "STEP": Fore.CYAN,
-    "BUILD": Fore.CYAN,
-    "PUSH": Fore.CYAN,
-    "PULL": Fore.CYAN,
-}
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
+        return formatter.format(record)
 
+def setup_logging():
+    """Configure root logger with colored output"""
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(ColoredFormatter())
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[handler]
+    )
 
-def _emit(level: str, message: str, stream: Optional[int] = None):
-    colour = _LEVEL_STYLES.get(level, "")
-    prefix = f"[{level}]"
-    output = f"{colour}{prefix}{Style.RESET_ALL} {message}"
-    print(output, file=sys.stderr if level in {"WARNING", "ERROR"} else sys.stdout)
-
-
-class Logger:
-    @staticmethod
-    def info(message: str):
-        _emit("INFO", message)
-
-    @staticmethod
-    def success(message: str):
-        _emit("SUCCESS", message)
-
-    @staticmethod
-    def final(message: str):
-        _emit("FINAL", message)
-
-    @staticmethod
-    def warning(message: str):
-        _emit("WARNING", message)
-
-    @staticmethod
-    def error(message: str):
-        _emit("ERROR", message)
-
-    @staticmethod
-    def step(message: str):
-        _emit("STEP", message)
-
-    @staticmethod
-    def build(message: str):
-        _emit("BUILD", message)
-
-    @staticmethod
-    def push(message: str):
-        _emit("PUSH", message)
-
-    @staticmethod
-    def pull(message: str):
-        _emit("PULL", message)

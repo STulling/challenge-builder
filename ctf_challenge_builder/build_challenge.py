@@ -8,57 +8,16 @@ Usage: build-challenge --ctfd-domain <ctfd-domain>
 
 import argparse
 import getpass
+import logging
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
-
-import requests
 
 from .challenge_builder import ChallengeBuilder
-from .logger import Logger
-from .utils import get_version
+from .logger import setup_logging
+from .utils import get_version, check_for_updates, parse_ctfd_url
 
 __version__ = get_version()
-
-# GitHub repository for version checks
-GITHUB_REPO = "STulling/challenge-builder"
-VERSION_CHECK_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/refs/heads/main/pyproject.toml"
-
-
-def check_for_updates():
-    """Check if a new version of the tool is available on GitHub"""
-    try:
-        response = requests.get(VERSION_CHECK_URL, timeout=5)
-        response.raise_for_status()
-        
-        # Parse version from pyproject.toml content
-        latest_version = None
-        for line in response.text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith('version =') or stripped.startswith('version='):
-                # Extract version string (handles: version = "0.2.12" or version="0.2.12")
-                version_part = stripped.split('=', 1)[1].strip()
-                latest_version = version_part.strip('"\'')
-                break
-        
-        if not latest_version:
-            return  # Could not parse version from remote file
-        
-        if latest_version != __version__:
-            Logger.warning(f"A new version ({latest_version}) is available. You are using version {__version__}.")
-            Logger.info("Update with: pipx upgrade ctf-challenge-builder")
-            print()
-        else:
-            Logger.info(f"You are using the latest version ({__version__})")
-            print()
-            
-    except requests.RequestException:
-        # Silently fail if we can't reach GitHub (offline, network issues, etc.)
-        pass
-    except Exception as e:
-        # Log unexpected errors but don't crash
-        Logger.warning(f"Could not check for updates: {e}")
 
 
 def _env_or_default(value: str, default: bool) -> bool:
@@ -70,44 +29,11 @@ def _env_or_default(value: str, default: bool) -> bool:
     return default
 
 
-def _parse_ctfd_url(ctfd_url: str) -> tuple:
-    """
-    Parse CTFd URL to extract subdomain and base domain.
-    
-    Args:
-        ctfd_url: Full CTFd URL (e.g., https://challenge.ctf.example or challenge.ctf.example)
-    
-    Returns:
-        tuple: (subdomain, ctf_domain, full_challenge_url)
-        Example: ("challenge", "ctf.example", "https://challenge.ctf.example")
-    """
-    # Add scheme if not present
-    if not ctfd_url.startswith(("http://", "https://")):
-        ctfd_url = f"https://{ctfd_url}"
-    
-    parsed = urlsplit(ctfd_url)
-    netloc = parsed.netloc.strip("/")
-    
-    if not netloc:
-        raise ValueError("Invalid CTFd URL: no domain found")
-    
-    host_parts = netloc.split(".")
-    if len(host_parts) < 2:
-        raise ValueError("Expected CTFd URL to contain at least a subdomain and domain (e.g., challenge.ctf.example)")
-    
-    subdomain = host_parts[0]
-    ctf_domain = ".".join(host_parts[1:])
-    
-    # Reconstruct full URL with proper scheme
-    scheme = parsed.scheme or "https"
-    full_url = f"{scheme}://{netloc}"
-    
-    return subdomain, ctf_domain, full_url
-
-
-
-
 def main():
+    # Configure logging
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
     # Check for updates first
     check_for_updates()
     
@@ -118,6 +44,13 @@ def main():
     parser.add_argument("--ctfd-password", help="CTFd password (will be prompted if not provided)")
     parser.add_argument("--oci-username", help="OCI registry username (will be prompted if not provided and needed)")
     parser.add_argument("--oci-password", help="OCI registry password (will be prompted if not provided and needed)")
+    parser.add_argument(
+        "--oci-registry",
+        help=(
+            "OCI registry hostname override. Defaults to registry.<ctf-domain> for "
+            "nested event domains and registry.<ctfd-host> for apex event domains."
+        ),
+    )
     parser.add_argument(
         "--ctfd-no-verify",
         action="store_true",
@@ -140,13 +73,13 @@ def main():
     # Parse CTFd URL to extract subdomain and domain
     ctfd_url = args.ctfd_domain or os.getenv("CTFD_DOMAIN")
     if not ctfd_url:
-        Logger.error("CTFd domain is required. Provide it via --ctfd-domain or CTFD_DOMAIN environment variable.")
+        logger.error("CTFd domain is required. Provide it via --ctfd-domain or CTFD_DOMAIN environment variable.")
         sys.exit(1)
     
     try:
-        subdomain, ctf_domain, full_ctfd_url = _parse_ctfd_url(ctfd_url.strip())
+        subdomain, ctf_domain, full_ctfd_url = parse_ctfd_url(ctfd_url.strip())
     except ValueError as e:
-        Logger.error(str(e))
+        logger.error(str(e))
         sys.exit(1)
 
     # Prompt for CTFd credentials if not provided
@@ -154,14 +87,15 @@ def main():
     ctfd_password = args.ctfd_password or os.getenv("CTFD_PASSWORD")
     
     if not ctfd_username:
-        ctfd_username = input(f"🔐 Enter CTFd username for {full_ctfd_url}: ").strip()
+        ctfd_username = input(f"Enter CTFd username for {full_ctfd_url}: ").strip()
     
     if not ctfd_password:
-        ctfd_password = getpass.getpass(f"🔐 Enter CTFd password for {full_ctfd_url}: ")
+        ctfd_password = getpass.getpass(f"Enter CTFd password for {full_ctfd_url}: ")
 
     # OCI credentials (will be prompted later if needed for docker login)
     oci_username = args.oci_username or os.getenv("OCI_USERNAME")
     oci_password = args.oci_password or os.getenv("OCI_PASSWORD")
+    oci_registry = args.oci_registry or os.getenv("OCI_REGISTRY")
 
     ctfd_verify_ssl = not args.ctfd_no_verify
     env_verify = os.getenv("CTFD_VERIFY_SSL")
@@ -175,7 +109,7 @@ def main():
         try:
             ctfd_timeout = int(env_timeout) if env_timeout else 60
         except ValueError:
-            Logger.warning("Invalid CTFD_TIMEOUT value; falling back to 60 seconds")
+            logger.warning("Invalid CTFD_TIMEOUT value; falling back to 60 seconds")
             ctfd_timeout = 60
 
     builder = ChallengeBuilder(
@@ -190,17 +124,18 @@ def main():
         ctfd_verbose=args.verbose,
         oci_username=oci_username,
         oci_password=oci_password,
+        oci_registry=oci_registry,
     )
 
     # challenge.yml is mandatory; docker-compose.yml is optional (only needed for dynamic_iac scenarios)
     if not builder.has_challenge:
-        Logger.warning("challenge.yml not found in the current directory. Nothing to do.")
+        logger.warning("challenge.yml not found in the current directory. Nothing to do.")
         sys.exit(0)
 
     try:
         builder.build()
     except Exception as e:
-        Logger.error(f"Build failed: {e}")
+        logger.error(f"Build failed: {e}")
         sys.exit(1)
 
 
