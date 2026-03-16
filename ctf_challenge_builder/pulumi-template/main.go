@@ -81,6 +81,7 @@ func (e *ComposeEnvironment) UnmarshalYAML(value *yaml.Node) error {
 type Service struct {
 	Image       string
 	Ports       []string
+	Expose      []string           `yaml:"expose"`
 	Environment ComposeEnvironment `yaml:"environment"`
 	DependsOn   []string           `yaml:"depends_on"`
 }
@@ -110,10 +111,12 @@ func sanitizeComposeForKompose(in DockerCompose) DockerCompose {
 		}
 
 		copiedDependsOn := append([]string(nil), svc.DependsOn...)
+		copiedExpose := append([]string(nil), svc.Expose...)
 
 		out.Services[name] = Service{
 			Image:       svc.Image,
 			Ports:       sanitizedPorts,
+			Expose:      copiedExpose,
 			Environment: copiedEnv,
 			DependsOn:   copiedDependsOn,
 		}
@@ -186,7 +189,7 @@ func main() {
 		hostname := Subdomain + "." + CtfDomain
 
 		for serviceName, svc := range dcfg.Services {
-			if len(svc.Ports) == 0 {
+			if len(svc.Ports) == 0 && len(svc.Expose) == 0 {
 				continue
 			}
 			bindings := k8s.PortBindingArray{}
@@ -249,6 +252,17 @@ func main() {
 					publicURL:         publicURL,
 				})
 				portIndexInService++
+			}
+
+			for _, p := range svc.Expose {
+				port := parsePort(p)
+				if port == 0 {
+					continue
+				}
+
+				bindings = append(bindings, k8s.PortBindingArgs{
+					Port: pulumi.Int(port),
+				})
 			}
 			if len(bindings) > 0 {
 				portBindings[serviceName] = bindings
