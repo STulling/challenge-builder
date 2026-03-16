@@ -66,7 +66,6 @@ class CTFdSync:
             "connection_info": challenge_data.get("connection_info"),
             "state": challenge_data.get("state", "visible"),
             "type": challenge_data.get("type", "dynamic"),
-            "is_http": challenge_data.get("is_http", False),
         }
 
         # 2. Copy Lists and Optional Fields
