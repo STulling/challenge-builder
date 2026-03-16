@@ -133,7 +133,8 @@ func main() {
 		type portInfo struct {
 			serviceName       string
 			port              int
-			protocol          string // "HTTP" or "TCP" (uppercase means add to ConnectionInfo)
+			protocol          string // Display protocol: "HTTP" or "TCP"
+			bindingProtocol   string // Underlying transport protocol used in Kompose URL keys
 			isHTTP            bool
 			addToConnInfo     bool
 			tcpIndexInService int    // Index of this TCP port within its service (for entrypoint selection)
@@ -201,6 +202,7 @@ func main() {
 					serviceName:       serviceName,
 					port:              port,
 					protocol:          strings.ToUpper(protocol),
+					bindingProtocol:   "TCP",
 					isHTTP:            isHTTP,
 					addToConnInfo:     addToConnInfo,
 					tcpIndexInService: portIndexInService,
@@ -269,7 +271,7 @@ func main() {
 			if !pi.addToConnInfo {
 				continue
 			}
-			portName := fmt.Sprintf("%d/%s", pi.port, pi.protocol)
+			portName := fmt.Sprintf("%d/%s", pi.port, pi.bindingProtocol)
 			url := kmp.URLs.MapIndex(pulumi.String(pi.serviceName)).MapIndex(pulumi.String(portName))
 			if pi.isHTTP {
 				connectionInfoParts = append(connectionInfoParts, pulumi.Sprintf("https://%s", url))
