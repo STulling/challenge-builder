@@ -28,6 +28,34 @@ class BuildPipeline:
         self.docker_manager = docker_manager
         self.oci_digest: Optional[str] = None
 
+    def _run_logged_command(self, cmd, step: str, env=None):
+        """Run a subprocess and log detailed diagnostics on failure."""
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=self.build_dir,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            logger.error("%s failed in %s", step, self.build_dir)
+            logger.error("Command: %s", exc.cmd)
+            logger.error("Exit code: %s", exc.returncode)
+
+            stdout = (exc.stdout or "").strip()
+            stderr = (exc.stderr or "").strip()
+
+            if stdout:
+                logger.error("stdout from %s:\n%s", step, stdout)
+            if stderr:
+                logger.error("stderr from %s:\n%s", step, stderr)
+            if not stdout and not stderr:
+                logger.error("%s produced no stdout/stderr output", step)
+
+            raise
+
     def prepare_build_directory(self, template_folder: Path, challenge_yml_path: Path, 
                                 updated_compose_data: dict):
         """Create and populate build directory"""
@@ -56,8 +84,7 @@ class BuildPipeline:
         logger.info("Building Go program...")
         
         # Go mod tidy
-        subprocess.run(['go', 'mod', 'tidy'], cwd=self.build_dir, check=True, 
-                      capture_output=True, text=True)
+        self._run_logged_command(['go', 'mod', 'tidy'], "go mod tidy")
         
         # Build statically linked binary
         env = os.environ.copy()
@@ -67,7 +94,7 @@ class BuildPipeline:
             '-ldflags', f"-s -w -X main.Subdomain={self.subdomain} -X main.CtfDomain={self.ctf_domain}",
             "main.go"
         ]
-        subprocess.run(build_cmd, cwd=self.build_dir, env=env, check=True, capture_output=True, text=True)
+        self._run_logged_command(build_cmd, "go build", env=env)
         
         if not (self.build_dir / "main").exists():
             raise RuntimeError("Go build failed: main binary not found")
