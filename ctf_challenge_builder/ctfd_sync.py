@@ -65,7 +65,10 @@ class CTFdSync:
             "attribution": challenge_data.get("attribution"),
             "connection_info": challenge_data.get("connection_info"),
             "state": challenge_data.get("state", "visible"),
-            "type": challenge_data.get("type", "dynamic"),
+            "type": challenge_data.get(
+                "type",
+                "multi_dynamic" if challenge_data.get("tasks") else "dynamic",
+            ),
         }
 
         # 2. Copy Lists and Optional Fields
@@ -76,6 +79,9 @@ class CTFdSync:
         # 3. Handle Type-Specific Configuration
         challenge_type = payload["type"]
         
+        if challenge_type == "multi_dynamic":
+            payload["tasks"] = challenge_data.get("tasks", [])
+
         if challenge_type == "dynamic_iac":
             # Merge specific dynamic_iac configuration
             payload.update(challenge_data.get("dynamic_iac", {}))
@@ -100,7 +106,7 @@ class CTFdSync:
             payload.update(challenge_data.get("dynamic", {}))
 
         # 4. Handle Scoring Configuration
-        if challenge_type in ("dynamic", "dynamic_iac"):
+        if challenge_type in ("dynamic", "dynamic_iac", "multi_dynamic"):
             # Copy scoring fields from root if not already present
             scoring_fields = ["value", "initial", "minimum", "decay", "function"]
             for field in scoring_fields:
@@ -108,7 +114,7 @@ class CTFdSync:
                     payload[field] = challenge_data[field]
 
             # Apply Scoring Defaults
-            starting_value = payload.get("value") or 500
+            starting_value = payload.get("value") or payload.get("initial") or 500
             payload.setdefault("value", starting_value)
             payload.setdefault("initial", starting_value)
             payload.setdefault("minimum", 50)

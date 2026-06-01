@@ -26,6 +26,49 @@ If your setup uses a different registry hostname, pass `--oci-registry <host>` o
 
 For classic (non-IaC) dynamic challenges you can omit `docker-compose.yml`; the builder will skip image/OCI packaging and only perform the CTFd synchronisation.
 
+For multi-task challenges, use the `multi_dynamic` challenge type and define a
+`tasks` list. Each task defines a weight. Players see points calculated from
+the current dynamic challenge value and each task's fraction of the total
+weight:
+
+```yaml
+name: Three Questions
+category: Misc
+type: multi_dynamic
+description: Answer all three questions.
+initial: 500
+minimum: 50
+decay: 50
+function: linear
+tasks:
+  - name: Question 1
+    weight: 1
+    input_template: "FLAG{first}"
+    flag:
+      type: static
+      content: FLAG{first}
+  - name: Question 2
+    weight: 1
+    input_template: "Enter a lowercase word"
+    flag:
+      type: regex
+      content: "[a-z]+"
+  - name: Question 3
+    weight: 2
+    input_template: "FLAG{third}"
+    flag:
+      type: static
+      content: FLAG{third}
+```
+
+With weights `1`, `1`, and `2`, the first two tasks each show and award 25% of
+the challenge's current dynamic value, and the third shows and awards 50%. If
+`tasks` is present and `type` is omitted, the builder uses `multi_dynamic`. The
+`input_template` value controls the placeholder shown in the task's answer
+field. Task flags use CTFd's normal flag types, including `static` and `regex`;
+regex flags use `content` as the regular expression and may set
+`data: case_insensitive`.
+
 ### Challenge.yml format example
 
 Define the challenge payload inside `challenge.yml` under a `ctfd` key. Example for a `dynamic_iac` challenge:
