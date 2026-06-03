@@ -67,6 +67,11 @@ def main():
         action="store_true",
         help="Enable verbose logging for CTFd requests and responses",
     )
+    parser.add_argument(
+        "--skip-bundle-flag-check",
+        action="store_true",
+        help="Allow challenge flags to appear in bundled files",
+    )
 
     args = parser.parse_args()
     
@@ -122,6 +127,7 @@ def main():
         ctfd_verify_ssl=ctfd_verify_ssl,
         ctfd_timeout=ctfd_timeout,
         ctfd_verbose=args.verbose,
+        skip_bundle_flag_check=args.skip_bundle_flag_check,
         oci_username=oci_username,
         oci_password=oci_password,
         oci_registry=oci_registry,

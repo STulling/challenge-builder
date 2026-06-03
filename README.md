@@ -145,6 +145,7 @@ bundle:
     - database/
     - website/
     - docker-compose.yml
+  skip_flag_check: true # optional: allow known flag strings in bundled files
 flags:
   - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
     type: static

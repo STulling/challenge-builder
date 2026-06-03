@@ -31,19 +31,26 @@ class BundleManager:
         except (OSError, IOError) as e:
             logger.warning(f"Could not read {file_path.name} for flag check: {e}")
 
-    def _add_path_to_zip(self, zip_handle: zipfile.ZipFile, source: Path, slug_prefix: str, flags: List[str] = None):
+    def _add_path_to_zip(
+        self,
+        zip_handle: zipfile.ZipFile,
+        source: Path,
+        slug_prefix: str,
+        flags: List[str] = None,
+        skip_flag_check: bool = False,
+    ):
         """Add a file or directory to a zip archive"""
         source = source.resolve()
         if source.is_dir():
             for file_path in sorted(source.rglob("*")):
                 if file_path.is_file():
-                    if flags:
+                    if flags and not skip_flag_check:
                         self._check_file_for_flags(file_path, flags)
                     arcname = file_path.relative_to(self.challenge_dir)
                     arcname_with_prefix = Path(slug_prefix) / arcname
                     zip_handle.write(file_path, arcname_with_prefix.as_posix())
         elif source.is_file():
-            if flags:
+            if flags and not skip_flag_check:
                 self._check_file_for_flags(source, flags)
             arcname = source.relative_to(self.challenge_dir)
             arcname_with_prefix = Path(slug_prefix) / arcname
@@ -51,10 +58,18 @@ class BundleManager:
         else:
             raise FileNotFoundError(f"Bundle entry not found: {source}")
 
-    def create_bundle(self, include_items: List[str], slug: str, flags: List[str] = None) -> Path:
+    def create_bundle(
+        self,
+        include_items: List[str],
+        slug: str,
+        flags: List[str] = None,
+        skip_flag_check: bool = False,
+    ) -> Path:
         """Create an offline challenge bundle"""
         if not include_items:
             raise ValueError("Bundle must include at least one file or directory")
+        if skip_flag_check:
+            logger.warning("Skipping bundle flag security check")
         
         # Clean previous bundles
         if self.dist_dir.exists():
@@ -68,7 +83,13 @@ class BundleManager:
         with zipfile.ZipFile(tmp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
             for item in include_items:
                 entry_path = (self.challenge_dir / item).resolve()
-                self._add_path_to_zip(zip_handle, entry_path, slug, flags)
+                self._add_path_to_zip(
+                    zip_handle,
+                    entry_path,
+                    slug,
+                    flags,
+                    skip_flag_check=skip_flag_check,
+                )
 
         # Rename with hash
         digest = sha256_file(tmp_zip_path)

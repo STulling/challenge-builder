@@ -25,7 +25,8 @@ class CTFdSync:
 
     def __init__(self, challenge_dir: Path, dist_dir: Path, ctfd_url: Optional[str],
                  ctfd_username: Optional[str], ctfd_password: Optional[str], 
-                 ctfd_verify_ssl: bool = True, ctfd_timeout: int = 60, ctfd_verbose: bool = False):
+                 ctfd_verify_ssl: bool = True, ctfd_timeout: int = 60,
+                 ctfd_verbose: bool = False, skip_bundle_flag_check: bool = False):
         self.challenge_dir = challenge_dir
         self.dist_dir = dist_dir
         self.ctfd_url = ctfd_url.rstrip("/") if ctfd_url else None
@@ -34,6 +35,7 @@ class CTFdSync:
         self.ctfd_verify_ssl = ctfd_verify_ssl
         self.ctfd_timeout = ctfd_timeout
         self.ctfd_verbose = ctfd_verbose
+        self.skip_bundle_flag_check = skip_bundle_flag_check
         self.bundle_manager = BundleManager(challenge_dir, dist_dir)
 
     def _collect_attachments(self, challenge_data: Dict[str, Any]) -> List[AttachmentSpec]:
@@ -199,8 +201,20 @@ class CTFdSync:
             include_items = bundle_cfg.get("include", [])
             if not isinstance(include_items, list):
                 raise ValueError("ctfd.bundle.include must be a list of paths")
+
+            skip_flag_check = bool(
+                self.skip_bundle_flag_check
+                or bundle_cfg.get("skip_flag_check")
+                or bundle_cfg.get("skip_flag_security_check")
+                or bundle_cfg.get("allow_flags")
+            )
             
-            bundle_path = self.bundle_manager.create_bundle(include_items, slug, flags)
+            bundle_path = self.bundle_manager.create_bundle(
+                include_items,
+                slug,
+                flags,
+                skip_flag_check=skip_flag_check,
+            )
             
             # Add bundle to files
             bundle_entry = {

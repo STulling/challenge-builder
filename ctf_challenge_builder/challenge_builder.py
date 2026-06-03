@@ -39,6 +39,7 @@ class ChallengeBuilder:
         ctfd_verify_ssl: bool = True,
         ctfd_timeout: int = 60,
         ctfd_verbose: bool = False,
+        skip_bundle_flag_check: bool = False,
         oci_username: Optional[str] = None,
         oci_password: Optional[str] = None,
         oci_registry: Optional[str] = None,
@@ -71,7 +72,8 @@ class ChallengeBuilder:
         self.docker = DockerManager(self.registry, self.subdomain, self.use_sudo)
         self.ctfd_sync = CTFdSync(
             self.challenge_dir, self.dist_dir, ctfd_url, 
-            ctfd_username, ctfd_password, ctfd_verify_ssl, ctfd_timeout, ctfd_verbose
+            ctfd_username, ctfd_password, ctfd_verify_ssl, ctfd_timeout,
+            ctfd_verbose, skip_bundle_flag_check
         )
         self.build_pipeline = BuildPipeline(
             self.build_dir, self.subdomain, self.ctf_domain, self.registry, 
