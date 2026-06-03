@@ -42,6 +42,9 @@ decay: 50
 function: linear
 tasks:
   - name: Question 1
+    description: |
+      Inspect the archive.
+      Submit the first flag you find.
     weight: 1
     input_template: "FLAG{first}"
     flag:
@@ -69,6 +72,21 @@ field. Task flags use CTFd's normal flag types, including `static` and `regex`;
 regex flags use `content` as the regular expression and may set
 `data: case_insensitive`.
 
+Regular challenge flags may be strings or objects. Object flags support CTFd's
+normal `data` field and the aliases `format_hint`, `formatHint`, `format`, and
+`placeholder`, which are forwarded as flag data:
+
+```yaml
+flags:
+  - FLAG{simple_static_flag}
+  - content: FLAG{case_insensitive_flag}
+    type: static
+    data: case_insensitive
+  - content: FLAG{...}
+    type: static
+    format_hint: "FLAG{...}"
+```
+
 ### Challenge.yml format example
 
 Define the challenge payload inside `challenge.yml` under a `ctfd` key. Example for a `dynamic_iac` challenge:
@@ -94,6 +112,7 @@ bundle: # what files will be available to the user
 flags:
   - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
     type: static
+    format_hint: "FLAG{...}"
 
 # Stuff for challenge deployment
 is_http: true # if removed it will default to False
@@ -129,6 +148,7 @@ bundle:
 flags:
   - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
     type: static
+    format_hint: "FLAG{...}"
 is_http: true 
 dynamic_iac:
   additional:

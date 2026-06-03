@@ -337,11 +337,21 @@ class CTFdClient:
             self._delete(self._url(f"/api/v1/flags/{flag['id']}"))
 
         for flag in flags:
+            if isinstance(flag, str):
+                flag = {"content": flag, "type": "static"}
+            data = flag.get("data")
+            if data is None:
+                data = (
+                    flag.get("format_hint")
+                    or flag.get("formatHint")
+                    or flag.get("format")
+                    or flag.get("placeholder")
+                )
             payload = {
                 "challenge": challenge_id,
                 "content": flag.get("content"),
                 "type": flag.get("type", "static"),
-                "data": flag.get("data"),
+                "data": data,
             }
             response = self._request(
                 "POST",

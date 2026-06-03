@@ -53,6 +53,43 @@ class CTFdSync:
                 attachments.append(AttachmentSpec.from_path(candidate, display_name))
         return attachments
 
+    def _normalize_flags(self, raw_flags: Any) -> List[Dict[str, Any]]:
+        """Normalize challenge.yml flags into CTFd API flag payloads."""
+        if raw_flags is None:
+            return []
+        if not isinstance(raw_flags, list):
+            raise ValueError("ctfd.flags must be a list")
+
+        flags: List[Dict[str, Any]] = []
+        for raw in raw_flags:
+            if isinstance(raw, str):
+                flags.append({"content": raw, "type": "static"})
+                continue
+            if not isinstance(raw, dict):
+                raise ValueError(f"Unsupported flag entry: {raw}")
+
+            content = raw.get("content")
+            if not content:
+                raise ValueError("flag entries must define content")
+
+            data = raw.get("data")
+            if data is None:
+                data = (
+                    raw.get("format_hint")
+                    or raw.get("formatHint")
+                    or raw.get("format")
+                    or raw.get("placeholder")
+                )
+
+            flag = {
+                "content": content,
+                "type": raw.get("type", "static"),
+            }
+            if data is not None:
+                flag["data"] = data
+            flags.append(flag)
+        return flags
+
     def _build_payload(self, challenge_data: Dict[str, Any],
                       oci_reference: Optional[str]) -> Dict[str, Any]:
         """Build CTFd challenge payload"""
@@ -72,7 +109,7 @@ class CTFdSync:
         }
 
         # 2. Copy Lists and Optional Fields
-        payload["flags"] = challenge_data.get("flags", [])
+        payload["flags"] = self._normalize_flags(challenge_data.get("flags", []))
         payload["hints"] = challenge_data.get("hints", [])
         payload["tags"] = challenge_data.get("tags")
 
@@ -150,13 +187,8 @@ class CTFdSync:
             return
 
         # Extract flags for bundle check
-        raw_flags = challenge_data.get("flags", [])
-        flags = []
-        for f in raw_flags:
-            if isinstance(f, str):
-                flags.append(f)
-            elif isinstance(f, dict) and "content" in f:
-                flags.append(f["content"])
+        raw_flags = self._normalize_flags(challenge_data.get("flags", []))
+        flags = [flag["content"] for flag in raw_flags]
 
         # Handle offline bundle
         bundle_cfg = challenge_data.get("bundle")
