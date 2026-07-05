@@ -160,6 +160,7 @@ class CTFdClient:
         slug: Optional[str] = None,
         name: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        recreate_on_type_change: bool = False,
     ) -> ChallengeSyncResult:
         """
         Create or update a challenge, only applying remote changes when needed.
@@ -172,6 +173,8 @@ class CTFdClient:
             slug: Optional slug for lookup.
             name: Challenge name, used as a lookup fall-back.
             tags: Desired user-defined tags.
+            recreate_on_type_change: Delete and recreate an existing challenge
+                when its type differs from the desired payload type.
         """
         self._authenticate()
 
@@ -182,7 +185,26 @@ class CTFdClient:
             existing = self._find_challenge(slug=slug, name=name or payload.get("name"))
 
         if existing:
-            self._update_challenge(existing["id"], payload, attachments, builder_hash, tags or [])
+            if self._challenge_type_changed(existing, payload):
+                if not recreate_on_type_change:
+                    self._raise_type_change_error(existing, payload)
+                logger.warning(
+                    "Deleting and recreating challenge %s because type changed from '%s' to '%s'",
+                    existing["id"],
+                    existing.get("type"),
+                    payload.get("type"),
+                )
+                self._delete_challenge(existing["id"])
+                new_id = self._create_challenge(payload, attachments, builder_hash, tags or [])
+                return ChallengeSyncResult(
+                    challenge_id=new_id,
+                    status="created",
+                    local_hash=builder_hash,
+                    remote_hash=None,
+                    detail=f"recreated previous challenge id {existing['id']} after type change",
+                )
+
+            self._update_challenge(existing, payload, attachments, builder_hash, tags or [])
             return ChallengeSyncResult(
                 challenge_id=existing["id"],
                 status="updated",
@@ -278,14 +300,39 @@ class CTFdClient:
         self._sync_files(challenge_id, attachments)
         return challenge_id
 
+    def _challenge_type_changed(self, existing: Dict[str, Any], payload: Dict[str, Any]) -> bool:
+        existing_type = existing.get("type")
+        desired_type = payload.get("type")
+        return bool(existing_type and desired_type and existing_type != desired_type)
+
+    def _raise_type_change_error(self, existing: Dict[str, Any], payload: Dict[str, Any]):
+        raise CTFdClientError(
+            f"Refusing to change challenge {existing['id']} type from "
+            f"'{existing.get('type')}' to '{payload.get('type')}'. Delete/recreate "
+            "the challenge, set recreate_on_type_change: true in challenge.yml, "
+            "or change the local challenge type to match CTFd."
+        )
+
+    def _delete_challenge(self, challenge_id: int):
+        response = self._request(
+            "DELETE",
+            self._url(f"/api/v1/challenges/{challenge_id}"),
+            headers={"Content-Type": "application/json"},
+            json={},
+        )
+        data = self._extract_json(response)
+        if not data.get("success"):
+            raise CTFdClientError(f"Failed to delete challenge {challenge_id}: {data}")
+
     def _update_challenge(
         self,
-        challenge_id: int,
+        existing: Dict[str, Any],
         payload: Dict[str, Any],
         attachments: List[AttachmentSpec],
         builder_hash: str,
         tags: List[str],
     ):
+        challenge_id = existing["id"]
         body = self._filter_challenge_payload(payload)
         response = self._request(
             "PATCH",

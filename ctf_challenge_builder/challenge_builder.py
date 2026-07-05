@@ -40,6 +40,7 @@ class ChallengeBuilder:
         ctfd_timeout: int = 60,
         ctfd_verbose: bool = False,
         skip_bundle_flag_check: bool = False,
+        recreate_on_type_change: bool = False,
         oci_username: Optional[str] = None,
         oci_password: Optional[str] = None,
         oci_registry: Optional[str] = None,
@@ -73,7 +74,7 @@ class ChallengeBuilder:
         self.ctfd_sync = CTFdSync(
             self.challenge_dir, self.dist_dir, ctfd_url, 
             ctfd_username, ctfd_password, ctfd_verify_ssl, ctfd_timeout,
-            ctfd_verbose, skip_bundle_flag_check
+            ctfd_verbose, skip_bundle_flag_check, recreate_on_type_change
         )
         self.build_pipeline = BuildPipeline(
             self.build_dir, self.subdomain, self.ctf_domain, self.registry, 

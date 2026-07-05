@@ -24,7 +24,8 @@ class CTFdSync:
     def __init__(self, challenge_dir: Path, dist_dir: Path, ctfd_url: Optional[str],
                  ctfd_username: Optional[str], ctfd_password: Optional[str], 
                  ctfd_verify_ssl: bool = True, ctfd_timeout: int = 60,
-                 ctfd_verbose: bool = False, skip_bundle_flag_check: bool = False):
+                 ctfd_verbose: bool = False, skip_bundle_flag_check: bool = False,
+                 recreate_on_type_change: bool = False):
         self.challenge_dir = challenge_dir
         self.dist_dir = dist_dir
         self.ctfd_url = ctfd_url.rstrip("/") if ctfd_url else None
@@ -34,6 +35,7 @@ class CTFdSync:
         self.ctfd_timeout = ctfd_timeout
         self.ctfd_verbose = ctfd_verbose
         self.skip_bundle_flag_check = skip_bundle_flag_check
+        self.recreate_on_type_change = recreate_on_type_change
         self.bundle_manager = BundleManager(challenge_dir, dist_dir)
 
     def _collect_attachments(self, challenge_data: Dict[str, Any]) -> List[AttachmentSpec]:
@@ -102,6 +104,17 @@ class CTFdSync:
             if lowered in ("0", "false", "no", "n", "off"):
                 return False
         raise ValueError("ctfd.bundle.zip must be a boolean")
+
+    def _bool_config(self, raw_value: Any, key: str) -> bool:
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            lowered = raw_value.strip().lower()
+            if lowered in ("1", "true", "yes", "y", "on"):
+                return True
+            if lowered in ("0", "false", "no", "n", "off"):
+                return False
+        raise ValueError(f"ctfd.{key} must be a boolean")
 
     def _build_payload(self, challenge_data: Dict[str, Any],
                       oci_reference: Optional[str]) -> Dict[str, Any]:
@@ -279,6 +292,13 @@ class CTFdSync:
                 slug=slug,
                 name=payload.get("name"),
                 tags=challenge_data.get("tags"),
+                recreate_on_type_change=(
+                    self.recreate_on_type_change
+                    or self._bool_config(
+                        challenge_data.get("recreate_on_type_change", False),
+                        "recreate_on_type_change",
+                    )
+                ),
             )
             self._log_result(result)
         except (CTFdAuthError, CTFdClientError) as exc:

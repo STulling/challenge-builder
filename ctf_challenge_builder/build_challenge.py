@@ -72,6 +72,11 @@ def main():
         action="store_true",
         help="Allow challenge flags to appear in bundled files",
     )
+    parser.add_argument(
+        "--recreate-on-type-change",
+        action="store_true",
+        help="Delete and recreate the CTFd challenge when its existing type differs from challenge.yml",
+    )
 
     args = parser.parse_args()
     
@@ -107,6 +112,11 @@ def main():
     if env_verify is not None:
         ctfd_verify_ssl = _env_or_default(env_verify, ctfd_verify_ssl)
 
+    recreate_on_type_change = args.recreate_on_type_change
+    env_recreate = os.getenv("CTFD_RECREATE_ON_TYPE_CHANGE")
+    if env_recreate is not None:
+        recreate_on_type_change = _env_or_default(env_recreate, recreate_on_type_change)
+
     # Timeout configuration (CLI flag overrides env; default 60s)
     ctfd_timeout = args.ctfd_timeout
     if ctfd_timeout is None:
@@ -128,6 +138,7 @@ def main():
         ctfd_timeout=ctfd_timeout,
         ctfd_verbose=args.verbose,
         skip_bundle_flag_check=args.skip_bundle_flag_check,
+        recreate_on_type_change=recreate_on_type_change,
         oci_username=oci_username,
         oci_password=oci_password,
         oci_registry=oci_registry,

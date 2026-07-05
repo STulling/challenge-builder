@@ -150,6 +150,7 @@ flags:
   - content: FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}
     type: static
     format_hint: "FLAG{...}"
+recreate_on_type_change: true # optional: delete/recreate if CTFd has this challenge under a different type
 is_http: true 
 dynamic_iac:
   additional:
@@ -168,5 +169,7 @@ bundle:
 ```
 
 In direct-file mode the builder uploads that file as-is and uses the file's own name, such as `handout.pdf`, unless `bundle.name` is set.
+
+By default, the builder refuses to update an existing CTFd challenge if its stored type differs from `challenge.yml`, because CTFd cannot safely migrate challenge subclass tables with a normal PATCH. Set `recreate_on_type_change: true` in `challenge.yml`, pass `--recreate-on-type-change`, or set `CTFD_RECREATE_ON_TYPE_CHANGE=1` to delete the existing challenge and create a fresh one with the requested type. This changes the challenge ID and removes the old challenge's solves, files, hints, and related state.
 
 Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time.
