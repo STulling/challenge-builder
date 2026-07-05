@@ -156,4 +156,17 @@ dynamic_iac:
     env.FLAG: "FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}"
 ```
 
-The `bundle.include` list can contain files or directories relative to the challenge root; the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. That archive is uploaded automatically. Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time.
+The `bundle.include` list can contain files or directories relative to the challenge root; by default the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. That archive is uploaded automatically.
+
+If the bundle should be a single existing file instead of a generated zip, set `bundle.zip` to `false` and include exactly one file:
+
+```yaml
+bundle:
+  zip: false
+  include:
+    - handout.pdf
+```
+
+In direct-file mode the builder uploads that file as-is and uses the file's own name, such as `handout.pdf`, unless `bundle.name` is set.
+
+Fields such as `mana_cost` and `timeout` inside the `dynamic_iac` block are forwarded directly to chall-manager so instance lifetimes behave as expected. Keys inside `dynamic_iac.additional` that start with `env.` become container environment variables at launch time.

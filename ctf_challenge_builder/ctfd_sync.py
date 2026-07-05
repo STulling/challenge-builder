@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """CTFd synchronization logic"""
 
-import zipfile
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .ctfd_client import (
     AttachmentSpec,
@@ -14,7 +13,6 @@ from .ctfd_client import (
     ChallengeSyncResult,
     calculate_sync_hash,
 )
-from .utils import sanitize_slug, sha256_file
 from .bundle_manager import BundleManager
 
 logger = logging.getLogger(__name__)
@@ -91,6 +89,19 @@ class CTFdSync:
                 flag["data"] = data
             flags.append(flag)
         return flags
+
+    def _bundle_zip_enabled(self, bundle_cfg: Dict[str, Any]) -> bool:
+        """Read bundle.zip, accepting normal YAML booleans and common strings."""
+        raw_value = bundle_cfg.get("zip", True)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            lowered = raw_value.strip().lower()
+            if lowered in ("1", "true", "yes", "y", "on"):
+                return True
+            if lowered in ("0", "false", "no", "n", "off"):
+                return False
+        raise ValueError("ctfd.bundle.zip must be a boolean")
 
     def _build_payload(self, challenge_data: Dict[str, Any],
                       oci_reference: Optional[str]) -> Dict[str, Any]:
@@ -208,12 +219,14 @@ class CTFdSync:
                 or bundle_cfg.get("skip_flag_security_check")
                 or bundle_cfg.get("allow_flags")
             )
+            zip_bundle = self._bundle_zip_enabled(bundle_cfg)
             
             bundle_path = self.bundle_manager.create_bundle(
                 include_items,
                 slug,
                 flags,
                 skip_flag_check=skip_flag_check,
+                zip_bundle=zip_bundle,
             )
             
             # Add bundle to files

@@ -4,9 +4,9 @@
 import zipfile
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
-from .utils import sanitize_slug, sha256_file
+from .utils import sha256_file
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +58,49 @@ class BundleManager:
         else:
             raise FileNotFoundError(f"Bundle entry not found: {source}")
 
+    def _select_plain_file(
+        self,
+        include_items: List[str],
+        flags: List[str] = None,
+        skip_flag_check: bool = False,
+    ) -> Path:
+        """Select a single existing file for direct upload."""
+        if len(include_items) != 1:
+            raise ValueError("Non-zip bundles must include exactly one file")
+
+        source = (self.challenge_dir / include_items[0]).resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"Bundle entry not found: {source}")
+        if not source.is_file():
+            raise ValueError(f"Non-zip bundle entry must be a file: {source}")
+
+        if flags and not skip_flag_check:
+            self._check_file_for_flags(source, flags)
+
+        return source
+
     def create_bundle(
         self,
         include_items: List[str],
         slug: str,
         flags: List[str] = None,
         skip_flag_check: bool = False,
+        zip_bundle: bool = True,
     ) -> Path:
         """Create an offline challenge bundle"""
         if not include_items:
             raise ValueError("Bundle must include at least one file or directory")
         if skip_flag_check:
             logger.warning("Skipping bundle flag security check")
+
+        if not zip_bundle:
+            bundle_path = self._select_plain_file(
+                include_items,
+                flags,
+                skip_flag_check=skip_flag_check,
+            )
+            logger.info(f"Using offline bundle file {bundle_path.relative_to(self.challenge_dir)}")
+            return bundle_path
         
         # Clean previous bundles
         if self.dist_dir.exists():
