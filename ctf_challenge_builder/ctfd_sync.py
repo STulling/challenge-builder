@@ -234,19 +234,25 @@ class CTFdSync:
             )
             zip_bundle = self._bundle_zip_enabled(bundle_cfg)
             
-            bundle_path = self.bundle_manager.create_bundle(
+            bundle_paths = self.bundle_manager.create_bundle(
                 include_items,
                 slug,
                 flags,
                 skip_flag_check=skip_flag_check,
                 zip_bundle=zip_bundle,
             )
+
+            if not zip_bundle and bundle_cfg.get("name") and len(bundle_paths) > 1:
+                raise ValueError("ctfd.bundle.name can only be used with a single non-zip bundle file")
             
-            # Add bundle to files
-            bundle_entry = {
-                "path": str(bundle_path.relative_to(self.challenge_dir)),
-                "name": bundle_cfg.get("name", bundle_path.name),
-            }
+            # Add bundle files to files
+            bundle_entries = [
+                {
+                    "path": str(bundle_path.relative_to(self.challenge_dir)),
+                    "name": bundle_cfg.get("name", bundle_path.name),
+                }
+                for bundle_path in bundle_paths
+            ]
             
             existing_files = challenge_data.get("files") or []
             if not isinstance(existing_files, list):
@@ -262,7 +268,7 @@ class CTFdSync:
                         continue
                 filtered_files.append(item)
             
-            challenge_data["files"] = [bundle_entry] + filtered_files
+            challenge_data["files"] = bundle_entries + filtered_files
 
         # Collect attachments and build payload
         try:

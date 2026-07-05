@@ -159,16 +159,17 @@ dynamic_iac:
 
 The `bundle.include` list can contain files or directories relative to the challenge root; by default the builder zips them into `dist/<slug>-<hash>.zip` where `<hash>` is the first eight characters of the archive’s SHA-256. That archive is uploaded automatically.
 
-If the bundle should be a single existing file instead of a generated zip, set `bundle.zip` to `false` and include exactly one file:
+If the bundle should upload existing files instead of a generated zip, set `bundle.zip` to `false` and list the files:
 
 ```yaml
 bundle:
   zip: false
   include:
     - handout.pdf
+    - source.py
 ```
 
-In direct-file mode the builder uploads that file as-is and uses the file's own name, such as `handout.pdf`, unless `bundle.name` is set.
+In direct-file mode the builder uploads each file as-is and uses each file's own name, such as `handout.pdf` and `source.py`. `bundle.name` can still override the upload name when exactly one direct file is included.
 
 By default, the builder refuses to update an existing CTFd challenge if its stored type differs from `challenge.yml`, because CTFd cannot safely migrate challenge subclass tables with a normal PATCH. Set `recreate_on_type_change: true` in `challenge.yml`, pass `--recreate-on-type-change`, or set `CTFD_RECREATE_ON_TYPE_CHANGE=1` to delete the existing challenge and create a fresh one with the requested type. This changes the challenge ID and removes the old challenge's solves, files, hints, and related state.
 

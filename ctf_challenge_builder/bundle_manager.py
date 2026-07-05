@@ -58,26 +58,26 @@ class BundleManager:
         else:
             raise FileNotFoundError(f"Bundle entry not found: {source}")
 
-    def _select_plain_file(
+    def _select_plain_files(
         self,
         include_items: List[str],
         flags: List[str] = None,
         skip_flag_check: bool = False,
-    ) -> Path:
-        """Select a single existing file for direct upload."""
-        if len(include_items) != 1:
-            raise ValueError("Non-zip bundles must include exactly one file")
+    ) -> List[Path]:
+        """Select existing files for direct upload."""
+        bundle_paths = []
+        for item in include_items:
+            source = (self.challenge_dir / item).resolve()
+            if not source.exists():
+                raise FileNotFoundError(f"Bundle entry not found: {source}")
+            if not source.is_file():
+                raise ValueError(f"Non-zip bundle entries must be files: {source}")
 
-        source = (self.challenge_dir / include_items[0]).resolve()
-        if not source.exists():
-            raise FileNotFoundError(f"Bundle entry not found: {source}")
-        if not source.is_file():
-            raise ValueError(f"Non-zip bundle entry must be a file: {source}")
+            if flags and not skip_flag_check:
+                self._check_file_for_flags(source, flags)
+            bundle_paths.append(source)
 
-        if flags and not skip_flag_check:
-            self._check_file_for_flags(source, flags)
-
-        return source
+        return bundle_paths
 
     def create_bundle(
         self,
@@ -86,7 +86,7 @@ class BundleManager:
         flags: List[str] = None,
         skip_flag_check: bool = False,
         zip_bundle: bool = True,
-    ) -> Path:
+    ) -> List[Path]:
         """Create an offline challenge bundle"""
         if not include_items:
             raise ValueError("Bundle must include at least one file or directory")
@@ -94,13 +94,14 @@ class BundleManager:
             logger.warning("Skipping bundle flag security check")
 
         if not zip_bundle:
-            bundle_path = self._select_plain_file(
+            bundle_paths = self._select_plain_files(
                 include_items,
                 flags,
                 skip_flag_check=skip_flag_check,
             )
-            logger.info(f"Using offline bundle file {bundle_path.relative_to(self.challenge_dir)}")
-            return bundle_path
+            for bundle_path in bundle_paths:
+                logger.info(f"Using offline bundle file {bundle_path.relative_to(self.challenge_dir)}")
+            return bundle_paths
         
         # Clean previous bundles
         if self.dist_dir.exists():
@@ -129,4 +130,4 @@ class BundleManager:
         tmp_zip_path.replace(final_path)
         
         logger.info(f"Created offline bundle {final_path.relative_to(self.challenge_dir)}")
-        return final_path
+        return [final_path]
