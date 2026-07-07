@@ -130,10 +130,12 @@ dynamic_iac:
       prefix: web
       service: app
       port: 8080
+      protocol: HTTP
     - name: Admin
       prefix: admin
       service: app
       port: 9000
+      protocol: HTTP
   additional: # additional variables to add to the dockerfiles when building
     env.FLAG: "FLAG{I_l1ke_gophers_I_kn0w_4rt1s_h4s_a_f3w}"
 ```
@@ -208,13 +210,17 @@ dynamic_iac:
       prefix: web
       service: app
       port: 8080
+      protocol: HTTP
     - name: Admin
       prefix: admin
       service: app
       port: 9000
+      protocol: TCP
 ```
 
 With entrypoints configured, players see only those endpoints. Generated hosts use the configured prefix, such as `web-<instanceid>.<ctf-domain>` and `admin-<instanceid>.<ctf-domain>`. If `entrypoints` is omitted, the builder falls back to all uppercase `/HTTP` and `/TCP` compose ports.
+
+When `entrypoints` is set, compose ports may omit `/HTTP` or `/TCP` suffixes because the player-facing endpoint list is explicit. Add `protocol: HTTP` or `protocol: TCP` to an entrypoint when the compose port has no suffix; otherwise protocol-less ports default to TCP routing.
 
 By default, the builder refuses to update an existing CTFd challenge if its stored type differs from `challenge.yml`, because CTFd cannot safely migrate challenge subclass tables with a normal PATCH. Set `recreate_on_type_change: true` in `challenge.yml`, pass `--recreate-on-type-change`, or set `CTFD_RECREATE_ON_TYPE_CHANGE=1` to delete the existing challenge and create a fresh one with the requested type. This changes the challenge ID and removes the old challenge's solves, files, hints, and related state.
 

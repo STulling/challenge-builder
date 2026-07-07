@@ -43,10 +43,11 @@ type DynamicIACConfig struct {
 }
 
 type EntrypointConfig struct {
-	Name    string `yaml:"name" json:"name"`
-	Prefix  string `yaml:"prefix" json:"prefix"`
-	Service string `yaml:"service" json:"service"`
-	Port    int    `yaml:"port" json:"port"`
+	Name     string `yaml:"name" json:"name"`
+	Prefix   string `yaml:"prefix" json:"prefix"`
+	Service  string `yaml:"service" json:"service"`
+	Port     int    `yaml:"port" json:"port"`
+	Protocol string `yaml:"protocol" json:"protocol"`
 }
 
 type DockerCompose struct {
@@ -223,6 +224,19 @@ type selectedEndpoint struct {
 	portInfo portInfo
 	name     string
 	prefix   string
+	protocol string
+}
+
+func normalizeEntrypointProtocol(protocol string) (string, error) {
+	if protocol == "" {
+		return "", nil
+	}
+	switch protocol {
+	case "HTTP", "http", "TCP", "tcp":
+		return strings.ToUpper(protocol), nil
+	default:
+		return "", fmt.Errorf("entrypoint protocol %q is invalid; use HTTP or TCP", protocol)
+	}
 }
 
 func connectionInfo(endpoints []connectionEndpoint) (string, error) {
@@ -240,7 +254,18 @@ func connectionInfo(endpoints []connectionEndpoint) (string, error) {
 }
 
 func httpRouteYAML(identity string, service string, port int, host string, prefix string) string {
-	return fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+	name := routeName(identity, service, port, prefix)
+	return fmt.Sprintf(`apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: %s-redirect-https
+  namespace: %s
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: %s
@@ -262,7 +287,7 @@ spec:
                 name: %s
                 port:
                   number: %d
-`, routeName(identity, service, port, prefix), identity, identity, identity, host, service, port)
+`, name, identity, name, identity, identity, name, host, service, port)
 }
 
 func tcpRouteYAML(identity string, service string, port int, host string, prefix string, tcpIndex int) string {
@@ -447,10 +472,15 @@ func main() {
 						if entrypoint.Prefix == "" {
 							entrypoint.Prefix = entrypoint.Name
 						}
+						protocol, err := normalizeEntrypointProtocol(entrypoint.Protocol)
+						if err != nil {
+							return err
+						}
 						selectedEndpoints = append(selectedEndpoints, selectedEndpoint{
 							portInfo: pi,
 							name:     entrypoint.Name,
 							prefix:   entrypoint.Prefix,
+							protocol: protocol,
 						})
 						found = true
 						break
@@ -469,6 +499,7 @@ func main() {
 						portInfo: pi,
 						name:     label,
 						prefix:   prefix,
+						protocol: pi.protocol,
 					})
 				}
 			}
@@ -481,11 +512,16 @@ func main() {
 			pi := selected.portInfo
 			endpointName := selected.name
 			endpointPrefix := selected.prefix
+			protocol := selected.protocol
+			if protocol == "" {
+				protocol = pi.protocol
+			}
+			isHTTP := protocol == "HTTP"
 			host := endpointHost(endpointPrefix, identity, hostname)
-			value := endpointValue(pi.isHTTP, host, tcpEntrypointPort(pi.tcpIndexInService))
+			value := endpointValue(isHTTP, host, tcpEntrypointPort(pi.tcpIndexInService))
 
 			var routeYAML string
-			if pi.isHTTP {
+			if isHTTP {
 				routeYAML = httpRouteYAML(identity, pi.serviceName, pi.port, host, endpointPrefix)
 			} else {
 				routeYAML = tcpRouteYAML(identity, pi.serviceName, pi.port, host, endpointPrefix, pi.tcpIndexInService)

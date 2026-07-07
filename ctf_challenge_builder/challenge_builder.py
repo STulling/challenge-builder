@@ -151,8 +151,14 @@ class ChallengeBuilder:
             # Build and push Docker images
             compose_data = self._read_docker_compose()
             
-            # Validate port protocol designations
-            validate_port_protocols(compose_data)
+            # Validate port protocol designations. Explicit entrypoints define the
+            # player-facing surface, so compose ports may omit visibility suffixes.
+            entrypoints = (
+                challenge_data.get("dynamic_iac", {}).get("entrypoints", [])
+                if isinstance(challenge_data.get("dynamic_iac"), dict)
+                else []
+            )
+            validate_port_protocols(compose_data, allow_missing_protocols=bool(entrypoints))
             
             self.docker.login(self.docker.oci_username, self.docker.oci_password)
             image_substitutions = self.docker.build_and_push_images(compose_data, self.challenge_dir, scenario_slug)

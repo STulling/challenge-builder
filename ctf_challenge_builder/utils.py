@@ -192,7 +192,7 @@ def sanitize_slug(raw: str) -> str:
     return sanitized.strip("-")
 
 
-def validate_port_protocols(compose_data: dict) -> None:
+def validate_port_protocols(compose_data: dict, allow_missing_protocols: bool = False) -> None:
     """
     Validate that all ports in docker-compose have proper protocol designations.
     
@@ -204,6 +204,7 @@ def validate_port_protocols(compose_data: dict) -> None:
     
     Args:
         compose_data: Parsed docker-compose.yml dictionary
+        allow_missing_protocols: If true, ports without /HTTP or /TCP are allowed.
         
     Raises:
         ValueError: If any port has missing, invalid, or ambiguous protocol
@@ -218,6 +219,8 @@ def validate_port_protocols(compose_data: dict) -> None:
             
             # Check if protocol is specified
             if "/" not in port_str:
+                if allow_missing_protocols:
+                    continue
                 errors.append(
                     f"Service '{service_name}': Port '{port_str}' is missing protocol. "
                     f"Specify as '{port_str}/TCP' or '{port_str}/HTTP' (uppercase to show in ConnectionInfo, lowercase to hide)"
