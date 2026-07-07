@@ -4,12 +4,15 @@ import (
 	"crypto/sha1"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/ctfer-io/chall-manager/sdk"
 	k8s "github.com/ctfer-io/chall-manager/sdk/kubernetes"
+	yamlv2 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/yaml/v2"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"gopkg.in/yaml.v3"
 )
@@ -26,12 +29,24 @@ var CtfDomain string
 var Subdomain string
 
 type ChallengeConfig struct {
-	Name string
-	Ctfd CTFDConfig
+	Name       string
+	Ctfd       CTFDConfig
+	DynamicIAC DynamicIACConfig `yaml:"dynamic_iac"`
 }
 
 type CTFDConfig struct {
 	Slug string
+}
+
+type DynamicIACConfig struct {
+	Entrypoints []EntrypointConfig `yaml:"entrypoints"`
+}
+
+type EntrypointConfig struct {
+	Name    string `yaml:"name" json:"name"`
+	Prefix  string `yaml:"prefix" json:"prefix"`
+	Service string `yaml:"service" json:"service"`
+	Port    int    `yaml:"port" json:"port"`
 }
 
 type DockerCompose struct {
@@ -84,6 +99,17 @@ type Service struct {
 	Expose      []string           `yaml:"expose"`
 	Environment ComposeEnvironment `yaml:"environment"`
 	DependsOn   []string           `yaml:"depends_on"`
+}
+
+type portInfo struct {
+	serviceName       string
+	port              int
+	protocol          string // Display protocol: "HTTP" or "TCP"
+	bindingProtocol   string // Underlying transport protocol used in Kompose URL keys
+	isHTTP            bool
+	addToConnInfo     bool
+	tcpIndexInService int    // Index of this TCP port within its service (for entrypoint selection)
+	publicURL         string // Pre-computed public URL for this port
 }
 
 func sanitizeComposeForKompose(in DockerCompose) DockerCompose {
@@ -143,11 +169,118 @@ func parsePort(p string) int {
 	return i
 }
 
-// randName generates a deterministic name from a seed (same as kompose.go)
+func parseProtocol(p string) string {
+	if idx := strings.Index(p, "/"); idx != -1 {
+		return p[idx+1:]
+	}
+	return "tcp"
+}
+
+// randName generates a deterministic name from a seed (same as kompose.go).
 func randName(seed string) string {
 	h := sha1.New()
 	h.Write([]byte(seed))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+var invalidHostPrefixChars = regexp.MustCompile(`[^a-z0-9-]+`)
+
+func sanitizeHostPrefix(prefix string) string {
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	prefix = invalidHostPrefixChars.ReplaceAllString(prefix, "-")
+	prefix = strings.Trim(prefix, "-")
+	if prefix == "" {
+		return "endpoint"
+	}
+	return prefix
+}
+
+func endpointHost(prefix string, identity string, hostname string) string {
+	return fmt.Sprintf("%s-%s.%s", sanitizeHostPrefix(prefix), identity, hostname)
+}
+
+func tcpEntrypointPort(index int) int {
+	return 1337 + (index % 6)
+}
+
+func routeName(identity string, service string, port int, prefix string) string {
+	return fmt.Sprintf("cm-%s-%s-%d-%s", identity, sanitizeHostPrefix(service), port, sanitizeHostPrefix(prefix))
+}
+
+func endpointValue(isHTTP bool, host string, tcpPort int) string {
+	if isHTTP {
+		return fmt.Sprintf("https://%s", host)
+	}
+	return fmt.Sprintf("ncat --ssl %s %d", host, tcpPort)
+}
+
+type connectionEndpoint struct {
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value"`
+}
+
+type selectedEndpoint struct {
+	portInfo portInfo
+	name     string
+	prefix   string
+}
+
+func connectionInfo(endpoints []connectionEndpoint) (string, error) {
+	if len(endpoints) == 0 {
+		return "", nil
+	}
+	if len(endpoints) == 1 {
+		return endpoints[0].Value, nil
+	}
+	data, err := json.Marshal(endpoints)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func httpRouteYAML(identity string, service string, port int, host string, prefix string) string {
+	return fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: %s
+  namespace: %s
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: %s-%s-redirect-https@kubernetescrd
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: %s
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: %s
+                port:
+                  number: %d
+`, routeName(identity, service, port, prefix), identity, identity, identity, host, service, port)
+}
+
+func tcpRouteYAML(identity string, service string, port int, host string, prefix string, tcpIndex int) string {
+	return fmt.Sprintf(`apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  entryPoints:
+  - ctf%d
+  routes:
+  - match: HostSNI(`+"`%s`"+`)
+    services:
+    - name: %s
+      port: %d
+  tls: {}
+`, routeName(identity, service, port, prefix), identity, tcpIndex%6, host, service, port)
 }
 
 func main() {
@@ -173,16 +306,6 @@ func main() {
 		// Build port bindings for all services with exposed ports
 		portBindings := k8s.PortBindingMapArray{}
 		// Track which ports should be added to ConnectionInfo (uppercase protocol = add to ConnectionInfo)
-		type portInfo struct {
-			serviceName       string
-			port              int
-			protocol          string // Display protocol: "HTTP" or "TCP"
-			bindingProtocol   string // Underlying transport protocol used in Kompose URL keys
-			isHTTP            bool
-			addToConnInfo     bool
-			tcpIndexInService int    // Index of this TCP port within its service (for entrypoint selection)
-			publicURL         string // Pre-computed public URL for this port
-		}
 		var exposedPorts []portInfo
 
 		identity := req.Config.Identity
@@ -205,11 +328,7 @@ func main() {
 				var isHTTP bool
 				var addToConnInfo bool
 
-				if idx := strings.Index(p, "/"); idx != -1 {
-					protocol = p[idx+1:]
-				} else {
-					protocol = "tcp" // default to tcp, lowercase = don't add to ConnectionInfo
-				}
+				protocol = parseProtocol(p)
 
 				// Check if HTTP or TCP based on protocol string
 				if strings.ToLower(protocol) == "http" {
@@ -223,17 +342,14 @@ func main() {
 				// Uppercase protocol means add to ConnectionInfo
 				addToConnInfo = protocol == strings.ToUpper(protocol)
 
-				// Pre-compute the public URL using the same logic as kompose.go
 				seed := fmt.Sprintf("%s-%s-%d/%s", identity, serviceName, port, strings.ToUpper(protocol))
 				uniqueName := randName(seed)[:len(identity)]
-				uniqueHost := fmt.Sprintf("%s.%s", uniqueName, hostname)
-
+				publicHost := fmt.Sprintf("%s.%s", uniqueName, hostname)
 				var publicURL string
 				if isHTTP {
-					publicURL = fmt.Sprintf("https://%s", uniqueHost)
+					publicURL = fmt.Sprintf("https://%s", publicHost)
 				} else {
-					traefikPort := 1337 + (portIndexInService % 6)
-					publicURL = fmt.Sprintf("%s:%d", uniqueHost, traefikPort)
+					publicURL = fmt.Sprintf("%s:%d", publicHost, tcpEntrypointPort(portIndexInService))
 				}
 
 				bindings = append(bindings, k8s.PortBindingArgs{
@@ -319,31 +435,81 @@ func main() {
 			return err
 		}
 
-		// Build ConnectionInfo from all ports that should be included
-		var connectionInfoParts []pulumi.StringOutput
-		for _, pi := range exposedPorts {
-			if !pi.addToConnInfo {
-				continue
+		selectedEndpoints := []selectedEndpoint{}
+		if len(cfg.DynamicIAC.Entrypoints) > 0 {
+			for _, entrypoint := range cfg.DynamicIAC.Entrypoints {
+				found := false
+				for _, pi := range exposedPorts {
+					if pi.serviceName == entrypoint.Service && pi.port == entrypoint.Port {
+						if entrypoint.Name == "" {
+							entrypoint.Name = entrypoint.Service
+						}
+						if entrypoint.Prefix == "" {
+							entrypoint.Prefix = entrypoint.Name
+						}
+						selectedEndpoints = append(selectedEndpoints, selectedEndpoint{
+							portInfo: pi,
+							name:     entrypoint.Name,
+							prefix:   entrypoint.Prefix,
+						})
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("dynamic_iac entrypoint %q references unknown compose port %s:%d", entrypoint.Name, entrypoint.Service, entrypoint.Port)
+				}
 			}
-			portName := fmt.Sprintf("%d/%s", pi.port, pi.bindingProtocol)
-			url := kmp.URLs.MapIndex(pulumi.String(pi.serviceName)).MapIndex(pulumi.String(portName))
-			if pi.isHTTP {
-				connectionInfoParts = append(connectionInfoParts, pulumi.Sprintf("https://%s", url))
-			} else {
-				// TCP port uses entrypoint ctf0-ctf5 (ports 1337-1342) based on port index within service
-				traefikPort := 1337 + (pi.tcpIndexInService % 6)
-				connectionInfoParts = append(connectionInfoParts, pulumi.Sprintf("ncat --ssl %s %d", url, traefikPort))
+		} else {
+			for _, pi := range exposedPorts {
+				if pi.addToConnInfo {
+					label := fmt.Sprintf("%s %d/%s", pi.serviceName, pi.port, pi.protocol)
+					prefix := fmt.Sprintf("%s-%d", pi.serviceName, pi.port)
+					selectedEndpoints = append(selectedEndpoints, selectedEndpoint{
+						portInfo: pi,
+						name:     label,
+						prefix:   prefix,
+					})
+				}
 			}
 		}
 
-		if len(connectionInfoParts) == 1 {
-			resp.ConnectionInfo = connectionInfoParts[0]
-		} else if len(connectionInfoParts) > 1 {
-			// Join with '&' separator
-			resp.ConnectionInfo = connectionInfoParts[0]
-			for i := 1; i < len(connectionInfoParts); i++ {
-				resp.ConnectionInfo = pulumi.Sprintf("%s&%s", resp.ConnectionInfo, connectionInfoParts[i])
+		var endpoints []connectionEndpoint
+		routeOpts := append([]pulumi.ResourceOption{}, opts...)
+		routeOpts = append(routeOpts, pulumi.DependsOn([]pulumi.Resource{kmp}))
+		for i, selected := range selectedEndpoints {
+			pi := selected.portInfo
+			endpointName := selected.name
+			endpointPrefix := selected.prefix
+			host := endpointHost(endpointPrefix, identity, hostname)
+			value := endpointValue(pi.isHTTP, host, tcpEntrypointPort(pi.tcpIndexInService))
+
+			var routeYAML string
+			if pi.isHTTP {
+				routeYAML = httpRouteYAML(identity, pi.serviceName, pi.port, host, endpointPrefix)
+			} else {
+				routeYAML = tcpRouteYAML(identity, pi.serviceName, pi.port, host, endpointPrefix, pi.tcpIndexInService)
 			}
+
+			_, err := yamlv2.NewConfigGroup(req.Ctx, fmt.Sprintf("readable-route-%d", i), &yamlv2.ConfigGroupArgs{
+				Yaml: pulumi.String(routeYAML),
+			}, routeOpts...)
+			if err != nil {
+				return err
+			}
+
+			endpoints = append(endpoints, connectionEndpoint{
+				Name:  endpointName,
+				Value: value,
+			})
+		}
+
+		info, err := connectionInfo(endpoints)
+		if err != nil {
+			return err
+		}
+		if info != "" {
+			resp.ConnectionInfo = pulumi.String(info).ToStringOutput()
 		}
 
 		return nil

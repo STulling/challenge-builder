@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import List
 
+import yaml
+
 from .utils import sha256_file
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,54 @@ class BundleManager:
         except (OSError, IOError) as e:
             logger.warning(f"Could not read {file_path.name} for flag check: {e}")
 
+    def _is_compose_file(self, file_path: Path) -> bool:
+        """Return true for docker-compose.yml / docker-compose.yaml files."""
+        return file_path.name in {"docker-compose.yml", "docker-compose.yaml"}
+
+    def _strip_compose_port_suffixes(self, content: bytes, file_path: Path) -> bytes:
+        """Strip player-only compose protocol suffixes from ports entries."""
+        try:
+            compose = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Could not parse compose file '{file_path.name}': {e}") from e
+
+        if not isinstance(compose, dict):
+            return content
+
+        services = compose.get("services")
+        if not isinstance(services, dict):
+            return content
+
+        changed = False
+        suffixes = ("/HTTP", "/TCP", "/http", "/tcp")
+
+        for service in services.values():
+            if not isinstance(service, dict):
+                continue
+            ports = service.get("ports")
+            if not isinstance(ports, list):
+                continue
+            for index, port in enumerate(ports):
+                if not isinstance(port, str):
+                    continue
+                for suffix in suffixes:
+                    if port.endswith(suffix):
+                        ports[index] = port[: -len(suffix)]
+                        changed = True
+                        break
+
+        if not changed:
+            return content
+
+        return yaml.safe_dump(compose, sort_keys=False).encode("utf-8")
+
+    def _read_bundle_file(self, file_path: Path) -> bytes:
+        """Read a bundle file, sanitizing docker-compose ports when needed."""
+        content = file_path.read_bytes()
+        if self._is_compose_file(file_path):
+            return self._strip_compose_port_suffixes(content, file_path)
+        return content
+
     def _add_path_to_zip(
         self,
         zip_handle: zipfile.ZipFile,
@@ -48,19 +98,26 @@ class BundleManager:
                         self._check_file_for_flags(file_path, flags)
                     arcname = file_path.relative_to(self.challenge_dir)
                     arcname_with_prefix = Path(slug_prefix) / arcname
-                    zip_handle.write(file_path, arcname_with_prefix.as_posix())
+                    if self._is_compose_file(file_path):
+                        zip_handle.writestr(arcname_with_prefix.as_posix(), self._read_bundle_file(file_path))
+                    else:
+                        zip_handle.write(file_path, arcname_with_prefix.as_posix())
         elif source.is_file():
             if flags and not skip_flag_check:
                 self._check_file_for_flags(source, flags)
             arcname = source.relative_to(self.challenge_dir)
             arcname_with_prefix = Path(slug_prefix) / arcname
-            zip_handle.write(source, arcname_with_prefix.as_posix())
+            if self._is_compose_file(source):
+                zip_handle.writestr(arcname_with_prefix.as_posix(), self._read_bundle_file(source))
+            else:
+                zip_handle.write(source, arcname_with_prefix.as_posix())
         else:
             raise FileNotFoundError(f"Bundle entry not found: {source}")
 
     def _select_plain_files(
         self,
         include_items: List[str],
+        slug: str,
         flags: List[str] = None,
         skip_flag_check: bool = False,
     ) -> List[Path]:
@@ -75,7 +132,14 @@ class BundleManager:
 
             if flags and not skip_flag_check:
                 self._check_file_for_flags(source, flags)
-            bundle_paths.append(source)
+            if self._is_compose_file(source):
+                bundle_dir = self.dist_dir / f"{slug}-bundle"
+                bundle_dir.mkdir(parents=True, exist_ok=True)
+                sanitized_path = bundle_dir / "docker-compose.yml"
+                sanitized_path.write_bytes(self._read_bundle_file(source))
+                bundle_paths.append(sanitized_path)
+            else:
+                bundle_paths.append(source)
 
         return bundle_paths
 
@@ -96,6 +160,7 @@ class BundleManager:
         if not zip_bundle:
             bundle_paths = self._select_plain_files(
                 include_items,
+                slug,
                 flags,
                 skip_flag_check=skip_flag_check,
             )
