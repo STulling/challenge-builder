@@ -148,6 +148,9 @@ class CTFdSync:
         if challenge_type == "dynamic_iac":
             # Merge specific dynamic_iac configuration
             payload.update(challenge_data.get("dynamic_iac", {}))
+            # entrypoints are consumed by the generated Pulumi scenario and are
+            # not a CTFd/chall-manager challenge model field.
+            payload.pop("entrypoints", None)
             
             # Set Scenario (OCI Image)
             if not payload.get("scenario"):
